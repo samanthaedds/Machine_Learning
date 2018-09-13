@@ -1,0 +1,391 @@
+---
+title: "Stats 503 Homework 4"
+author: "Sam Edds"
+date: "3/15/2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+
+```
+
+```{r}
+
+# Call packages #
+
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(stats)
+library(GGally)
+library(nnet)
+library(data.table)
+library(tidyr)
+library(rpart)
+library(rpart.plot)
+library(e1071)
+library(sparsediscrim)
+library(reshape2)
+library(plyr)
+library(randomForest)
+library(neuralnet)
+
+```
+
+
+
+```{r, cache=TRUE}
+
+#### Pre-processing ####
+
+# Set Working Directory
+
+setwd("/Users/samanthaedds/Desktop/Stats_503/Homework 4")
+
+
+set.seed(9)
+
+# Preprocessing function
+for (.SMP. in c("normal_", "3-7_", "2-8_", "1-9_" "resampled_data_")) {
+
+.SMP. = "gender_"
+.SMP. = "weight_tot_"
+.SMP. = "weight_males_"
+.SMP. = "weight_females_"
+
+# Read in data
+
+spam_names <- fread("spam-names.txt", header = FALSE)
+spam_train <- fread("spam-train.txt", header = FALSE)
+spam_test <- fread("spam-test.txt", header = FALSE)
+
+# Fix name file
+
+spam_names$names = substr(spam_names$V1,1,nchar(spam_names$V1)-1)
+spam_names <- dplyr::select(spam_names, names)
+new_spam <- as.vector(t(spam_names))
+
+colnames(spam_train)[1:57] <- new_spam
+colnames(spam_train)[58] <- "Class"
+colnames(spam_test)[1:57] <- new_spam
+colnames(spam_test)[58] <- "Class"
+
+spam_train <- dplyr::mutate(spam_train, Class = as.factor(Class))
+spam_test <- dplyr::mutate(spam_test, Class = as.factor(Class))
+
+# Add additional preprocessing #
+
+preprocess <- function(data, spam_training = FALSE) {
+  data <- cbind(scale(data[1:57]), data[,58]) %>% data.frame()
+
+names <- c(paste0("Var_", 1:57), "Spam")
+colnames(data) <- names
+spam <- data %>% filter(Spam == 1)
+nospam <- data %>% filter(Spam != 1)
+
+# Normal #
+if (.SMP. == "normal_" & spam_training){
+
+# 3-7 ratio #
+} else if (.SMP. == "3-7_" & spam_training){
+  total = nrow(data)
+  r = 0.30
+  data = bind_rows(spam[sample(x = seq_len(nrow(spam)), floor(r * total), TRUE),], nospam[sample(seq_len(nrow(nospam)), floor((1-r) * total), TRUE),])
+
+# 2-8 ratio #
+} else if (.SMP. == "2-8_" & spam_training){
+  total = nrow(data)
+  r = 0.20
+  data = bind_rows(spam[sample(x = seq_len(nrow(spam)), floor(r * total), TRUE),], nospam[sample(seq_len(nrow(nospam)), floor((1-r) * total), TRUE),])
+
+# 1-9 ratio #
+} else if (.SMP. == "1-9_" & spam_training){
+  total = nrow(data)
+  r = 0.10
+  data = bind_rows(spam[sample(x = seq_len(nrow(spam)), floor(r * total), TRUE),], nospam[sample(seq_len(nrow(nospam)), floor((1-r) * total), TRUE),])
+ 
+# Resampled # 
+} else if (.SMP. == "resampled_data_" & spam_training){
+  total = nrow(data)
+  r = 0.40
+  nospam = sample_frac(nospam, size = .25)
+  data = bind_rows(spam[sample(x = seq_len(nrow(spam)), floor(r * total), TRUE),], nospam[sample(seq_len(nrow(nospam)), floor((1-r) * total), TRUE),])
+} else if (!spam_training) {
+  
+} else { 
+  stop("Prepend issue")
+  }
+data
+ }
+
+
+spamtrain <- preprocess(spam_train, spam_training = T)
+spamtest <- preprocess(spam_test, spam_training = F) 
+
+spamtrain$Spam <- as.factor(spamtrain$Spam)
+spamtest$Spam <- as.factor(spamtest$Spam)
+
+
+#### SVM ####
+
+set.seed(9)
+
+# Compute the best tuning parameters for slack and gamma when applicable
+
+costs = exp(-2:2)
+gams = c(.01, .05, .1)
+degrees = c(2,3)
+tc <- tune.control(cross = 10)
+
+# Compute best cross-validated model
+
+svm_func <- function (x,y,costs,gams, degrees) {
+x_tune.out = tune.svm(Spam ~., data = spamtrain, cost = costs, gamma = gams, degree = degrees, tunecontrol = tc, kernel = y)
+x_models <- summary(x_tune.out)
+}
+
+# Run for each kernel type
+
+gaus_models <- svm_func(gaus, "radial", costs, gams, 0)
+lin_models <- svm_func(lin, "linear", costs, 0, 0)
+poly_models <- svm_func(poly, "polynomial", costs, gams, degrees)
+
+# Order error rates by type
+
+gaus_sum <- data.frame(gaus_models$performances) %>%
+            dplyr::mutate(Type = "Gaussian")
+lin_sum <- data.frame(lin_models$performances) %>%
+            dplyr::mutate(Type = "Linear")
+poly_sum <- data.frame(poly_models$performances) %>%
+            dplyr::mutate(Type = "Polynomial")
+
+gaus_sum_stats <- gaus_sum[order(gaus_sum$error), ] 
+lin_sum_stats <- lin_sum[order(lin_sum$error), ] 
+poly_sum_stats <- poly_sum[order(poly_sum$error), ] 
+
+# Create table of error rates
+
+svm_sums <- rbind(gaus_sum, lin_sum, poly_sum)
+
+form = sprintf("%scv_svm_ouputs.csv", .SMP.)
+write.csv(svm_sums, file = form)
+
+pdf(sprintf("./%ssvm_plot.pdf", .SMP.))
+
+final_err_plot <- 
+  svm_sums$degree <- as.factor(svm_sums$degree)
+  ggplot(svm_sums) + 
+  facet_wrap(Type ~ gamma) +
+  geom_line(data = svm_sums %>% filter(Type == "Gaussian"), mapping = aes(x = cost, y = error)) +
+  geom_line(data = svm_sums %>% filter(Type == "Linear"), mapping = aes(x = cost, y = error)) +
+  geom_line(data = svm_sums %>% filter(Type == "Polynomial"), mapping = aes(x = cost, y = error, color = degree))
+    
+  geom_line(aes(color = Type, group = Type)) 
+
+dev.off()
+
+# Find best kernel type
+
+svm_sums_stats <- dplyr::summarize(group_by(svm_sums, Type), avg_error = mean(error))
+svm_sums_stats <- svm_sums_stats[order(svm_sums_stats$avg_error, svm_sums_stats$Type), ] 
+
+form = sprintf("%ssvm_kernal_optimal.csv", .SMP.)
+write.csv(svm_sums_stats, file = form)
+
+# Compute optimal model again
+
+svm_opt <- function (x,y,costs,gams, degrees) {
+x_tune.out = tune.svm(Spam ~., data = spamtrain, cost = costs, gamma = gams, degree = degrees, tunecontrol = tc, kernel = y)
+best_model <- x_tune.out$best.model
+}
+
+gaus_best <- svm_opt(gaus, "radial", costs, gams, 0)
+lin_best <- svm_opt(lin, "linear", costs, 0, 0)
+poly_best <- svm_opt(poly, "polynomial", costs, gams, degrees)
+
+# Predict train and test error with optimized model
+
+pred_svm <- function(x) {
+test_error = sum(predict(x, spamtest) != spamtest$Spam) / nrow(spamtest)
+train_error = sum(predict(x, spamtrain) != spamtrain$Spam) / nrow(spamtrain)
+
+output_table = cbind(test_error, train_error)
+}
+
+# Take best model for each  
+
+gaus_pred_svm <- pred_svm(gaus_best)
+lin_pred_svm <- pred_svm(lin_best)
+poly_pred_svm <- pred_svm(poly_best)
+
+# Compile final error rates
+
+svm_error_rates <- as.data.frame(rbind(gaus_pred_svm, lin_pred_svm, poly_pred_svm)) %>%
+                   dplyr::mutate(Type = "name")
+
+svm_error_rates$Type[1] <- "Gaussian"
+svm_error_rates$Type[2] <- "Linear"
+svm_error_rates$Type[3] <- "Polynomial"
+
+colnames(svm_error_rates)[1:2] <- c("Test Error", "Train Error")
+
+form = sprintf("%scv_svm.csv", .SMP.)
+write.csv(svm_error_rates, file = form)
+
+
+```
+
+```{r, cache=TRUE}
+
+#### Neural Networks ####
+
+# Create formula for neural networks
+
+spam_neural <- formula(paste("c1 + c2", paste(sprintf("`%s`",colnames(spamtrain)[-58]), collapse = " + "), sep = " ~ "))
+
+# Create separate dummy variables for each class
+
+nn_spam_train <- cbind(spamtrain, class.ind(as.factor(spamtrain$Spam)))
+nn_spam_test <- cbind(spamtest, class.ind(as.factor(spamtest$Spam)))
+
+# Rename columns to reflect formula
+
+colnames(nn_spam_train)[59:60] <- c("c1", "c2")
+colnames(nn_spam_test)[59:60] <- c("c1", "c2")
+
+# Select number of hidden layers and nodes 
+
+pred = function(nn, dat) {
+  yhat = compute(nn, dat)$net.result
+  yhat = apply(yhat, 1, which.max)
+  return(yhat)
+}
+
+nnode = c(5, 10, 15)
+
+ntimes = c(1,2)
+
+# Sample for k = 10 folds cross-validation
+
+idx <- sample(1:10, size = nrow(nn_spam_train), replace = T)
+
+decisionMatrix = expand.grid(nnode = nnode, ntimes = ntimes)
+
+cv_nn <- adply(decisionMatrix, 1, function(i) {
+  
+  ldply(1:10, function(set_choice) {
+    
+    samp = nn_spam_train[which(idx != set_choice), ]
+    
+    fake_test = nn_spam_train[-which(idx != set_choice), ]
+    
+    nn <- neuralnet(spam_neural, data=samp, hidden = i$nnode, i$ntimes, linear.output = F, lifesign = "full")
+    
+    nn_class_pred <- pred(nn, fake_test[, -c(58, (ncol(fake_test) - 2):ncol(fake_test))])
+    nn_test_table <- table(fake_test$Spam, nn_class_pred) 
+    err = mean(nn_class_pred != fake_test$Spam)
+    data.frame(Error = err, set_choice = set_choice)
+    
+  })
+  
+}, .progress = progress_text())
+
+# Compute average error rates
+
+cv_nn_stats <- dplyr::summarise(group_by(cv_nn, nnode, ntimes), avg_error = mean(Error))
+cv_nn_stats <- cv_nn_stats[order(cv_nn_stats$avg_error), ] 
+
+form = sprintf("%scv_nn.csv", .SMP.)
+write.csv(cv_nn_stats, file = form)
+
+# Based on the lowest mean error from our CV models, compute best model train and test error
+
+final_nn_error <- function(x,y,opt_node, opt_times, pred, spam_neural) {
+    nn <- neuralnet(spam_neural, data=x, hidden = c(opt_node, opt_times), linear.output = F, lifesign = "full")
+    nn_class_pred <- pred(nn, y[, -c(58, (ncol(y) - 2):ncol(y))])
+    nn_test_table <- table(y$Spam, nn_class_pred) 
+    err = mean(nn_class_pred != y$Spam)
+    data.frame(Error = err)
+}
+
+final_nn_train <- final_nn_error(nn_spam_train, nn_spam_train, cv_nn_stats$nnode[1], cv_nn_stats$ntimes[1], pred, spam_neural)
+final_nn_test <- final_nn_error(nn_spam_train, nn_spam_test, cv_nn_stats$nnode[1], cv_nn_stats$ntimes[1], pred, spam_neural)
+
+final_nn_total <- as.data.frame(rbind(final_nn_train, final_nn_test)) %>%
+                  dplyr::mutate( Type = "name")
+
+final_nn_total$Type[1] <- "Train Error"
+final_nn_total$Type[2] <- "Test Error"
+
+final_nn = sprintf("%sfinal_nn_test.csv", .SMP.)
+write.csv(final_nn_total, file = final_nn)
+
+```
+
+```{r, cache=TRUE}
+
+#### Decision Trees ####
+
+maxdepth = c(0:6)
+
+idx <- sample(1:10, size = nrow(spamtrain), replace = T)
+
+decisionMatrix = expand.grid(maxdepth = maxdepth)
+
+cv_tree <- adply(decisionMatrix, 1, function(i) {
+
+  ldply(1:10, function(set_choice) {
+
+    samp = spamtrain[which(idx != set_choice), ]
+    fake_test = spamtrain[-which(idx != set_choice), ]
+    tr <- party::ctree(Spam~., data=spamtrain, control = ctree_control(maxdepth = i$maxdepth))
+    err = mean(fake_test[,58] != predict(tr, fake_test[,-58]))
+    data.frame(Error = err, set_choice = set_choice)
+
+  })
+
+}, .progress = progress_text())
+
+# Compute average error rates
+
+cv_tree_stats <- dplyr::summarise(group_by(cv_tree, maxdepth), avg_error = mean(Error))
+cv_tree_stats <- cv_tree_stats[order(cv_tree_stats$avg_error), ] 
+
+form = sprintf("%scv_tr.csv", .SMP.)
+write.csv(cv_tree_stats, file = form)
+
+# Based on the lowest mean error from our CV models, compute best model train and test error
+
+final_tr_error <- function(x,tree, pred) {
+    tr <- party::ctree(Spam~., data=spamtrain, control = ctree_control(maxdepth = tree))
+    err = mean(x[,58] != predict(tr, x[,-58]))
+    data.frame(Error = err)
+}
+
+final_tr_train <- final_tr_error(spamtrain, cv_tree_stats$maxdepth[1], pred)
+final_tr_test <- final_tr_error(spamtest, cv_tree_stats$maxdepth[1], pred)
+
+final_tr_total <- as.data.frame(rbind(final_tr_train, final_tr_test)) %>%
+                  dplyr::mutate( Type = "name")
+
+final_tr_total$Type[1] <- "Train Error"
+final_tr_total$Type[2] <- "Test Error"
+
+final_tr = sprintf("%sfinal_tr_test.csv", .SMP.)
+write.csv(final_tr_total, file = final_tr)
+
+# Graph for all errors
+
+pdf(sprintf("./%strees_plot.pdf", .SMP.))
+
+final_tree_err_plot <- 
+  cv_tr$maxdepth <- as.factor(cv_tr$maxdepth)
+  ggplot(cv_tree) + 
+  geom_line(data = cv_tree, mapping = aes(x = maxdepth, y = Error, color = maxdepth)) 
+
+dev.off()
+}
+```
+

@@ -1,0 +1,449 @@
+---
+title: "Open Powerlifting Project"
+author: "Sam Edds"
+date: "4/16/2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+
+```
+
+```{r}
+
+# Call packages 
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(stats)
+library(GGally)
+library(nnet)
+library(data.table)
+library(tidyr)
+library(rpart)
+library(rpart.plot)
+library(e1071)
+library(sparsediscrim)
+library(reshape2)
+library(plyr)
+library(randomForest)
+library(gridExtra)
+```
+
+
+
+```{r}
+#### Set-up ####
+
+# Set working directory
+setwd("/Users/samanthaedds/Desktop/Stats_503/Project")
+
+# Read in files
+powerlifting_data = read.csv("openpowerlifting.csv", header = TRUE)
+meets_data = read.csv("meets.csv", header = TRUE)
+
+# Keep only specific variables
+lifting_sub <- powerlifting_data %>% dplyr::select(-WeightClassKg, -Division, -Squat4Kg, 
+                                                   -Bench4Kg, -Deadlift4Kg, -Wilks, -Place, -MeetID,
+                                                   -Equipment)
+
+# Remove observations if they are missing any of the Best bench, squat, or deadlift
+lifting_sub <- na.omit(lifting_sub)
+
+# Add age group variable
+lifting_sub <-dplyr::mutate(lifting_sub, Age = ceiling(Age)) %>%
+  dplyr::filter(Age >= 18) %>%
+  dplyr::mutate(age_group = case_when(Age <=35 ~ 1,
+                                      Age>35 & Age<=55 ~2,
+                                      Age>55 ~3))
+
+lifting_sub <- dplyr::mutate(lifting_sub, age_group = as.factor(age_group))
+
+# Add bodyweight group variable (separately for male and female)
+lifting_women_sub <- dplyr::filter(lifting_sub, Sex == "F") %>%
+  dplyr::mutate(weight_group = case_when(BodyweightKg <=60 ~ 1,
+                                      BodyweightKg>60 & BodyweightKg<=80 ~2,
+                                      BodyweightKg>80 ~3))  
+
+lifting_men_sub <- dplyr::filter(lifting_sub, Sex == "M") %>%
+  dplyr::mutate(weight_group = case_when(BodyweightKg <=80 ~ 1,
+                                      BodyweightKg>80 & BodyweightKg<=120 ~2,
+                                      BodyweightKg>120 ~3)) 
+
+lifting_sub <- rbind(lifting_men_sub, lifting_women_sub)
+
+lifting_sub <- lifting_sub %>% dplyr::mutate(weight_group = as.factor(weight_group))
+
+
+set.seed(9)
+
+# Center and scale
+center_scale <- dplyr::select(lifting_sub, -Name, -Sex, -Age, -age_group, -weight_group)
+center_scale <- as.data.frame(scale(center_scale))
+non_cts_vars <- dplyr::select(lifting_sub, Name, Sex, Age, age_group, weight_group)
+
+# Add back together
+lifting_sub <- cbind(center_scale, non_cts_vars)
+
+# Randomly sample from each individual (individuals appear anywhere from 1-300+ times in the dataset)
+power_indiv = lifting_sub %>% 
+  group_by(Name) %>% 
+  dplyr:::sample_n.grouped_df(size = 1)
+
+# Check that we only have one observation per person
+indiv_check <- arrange(power_indiv, Name)
+check <- indiv_check[!duplicated(indiv_check[,c("Name")]),]
+
+# Sample equally from each gender / sample 75% within each class 
+classes = lapply(levels(power_indiv$Sex), function(x) which(power_indiv$Sex==x))
+train = lapply(classes, function(class) sample(class, 0.75*length(class), replace = F))
+
+# Unlist
+train = unlist(train)
+
+```
+
+```{r}
+
+#### Basic Diagnostics ####
+
+# Run in prior analysis
+```
+
+```{r}
+##############################################################################################
+#### Preprocessing ####
+##############################################################################################
+
+lifting_train = as.data.frame(power_indiv[train,])
+lifting_test = as.data.frame(power_indiv[-train,])
+
+for (.SMP. in c("gender_", "weight_tot_", "weight_males_", "weight_females_")) {
+  
+preprocess <- function(data) {
+  data <- data
+
+# Preprocessing function that allows us to run everything in a loop
+
+.SMP. = "gender_"
+.SMP. = "weight_tot_"
+.SMP. = "weight_males_"
+.SMP. = "weight_females_"
+
+# Gender 
+if (.SMP. == "gender_"){
+  data = data %>% 
+    ungroup() %>%
+    dplyr::mutate(y = Sex) %>%
+    dplyr::select(-Name, -age_group, -weight_group, -Sex) 
+  
+  # Overall Weight Groups #
+} else if (.SMP. == "weight_tot_"){
+  data = data %>% 
+    ungroup() %>%
+    dplyr::mutate(y = weight_group) %>%
+    dplyr::select(-Name, -age_group, -Sex, -BodyweightKg, -weight_group)
+  
+  # Male Weight Groups #
+} else if (.SMP. == "weight_males_"){
+  data = data %>% 
+    ungroup() %>%
+    dplyr::mutate(y = weight_group) %>%
+    dplyr::filter(Sex == 'M') %>%
+    dplyr::select(-Name, -age_group, -Sex, -BodyweightKg, -weight_group)
+  
+  # Female Weight Groups #
+} else if (.SMP. == "1-9_"){
+  data = data %>% 
+    ungroup() %>%
+    dplyr::mutate(y = weight_group) %>%
+    dplyr::filter(Sex == 'F') %>%
+    dplyr::select(-Name, -age_group, -Sex, -BodyweightKg, - weight_group)
+  
+} else { 
+  stop("Prepend issue")
+}
+data
+}
+
+
+liftingtrain <- preprocess(lifting_train)
+liftingtest <- preprocess(lifting_test) 
+```
+
+
+
+```{r}
+##############################################################################################
+#### KNN ####
+##############################################################################################
+
+
+cv.knn<- function (dataY, dataX, kn=1, K=5, seed=123) {
+  n <- nrow(dataX)
+  set.seed(seed)
+  library(class)
+  
+  f <- ceiling(n/K)
+  s <- sample(rep(1:K, f), n)  
+  dataX=scale(dataX)
+  CV=NULL;PvsO=NULL
+  
+  for (i in 1:K) { 
+    test.index <- seq_len(n)[(s == i)] #test data
+    train.index <- seq_len(n)[(s != i)] #training data
+    
+    train.X <- dataX[train.index,]
+    test.X <- dataX[test.index,]
+    train.y <- dataY[train.index]
+    test.y <- dataY[test.index]
+    #predicted test set y
+    knn.pred=knn(train.X, test.X, train.y, k=kn) 
+    #observed - predicted on test data 
+    error= mean(knn.pred!=test.y) 
+    #error rates 
+    CV=c(CV,mean(error))
+    predvsobs=data.frame(knn.pred,test.y)
+    PvsO=rbind(PvsO,predvsobs)
+  } 
+  
+  #Output
+  list(k = K, error = CV,
+       knn_error_rate = mean(CV), confusion=table(PvsO[,1],PvsO[,2]), seed=seed)
+}
+
+
+multi.knn.cv <- function(dataY, dataX, kn, K){
+  cv.error=NULL
+  for (i in 1:kn) {
+    cv.error[i] <- cv.knn(dataY, dataX, kn=i, 
+                          K=K, seed=123)$knn_error_rate
+    
+  }
+  cv.table = t(as.data.frame(cv.error))
+  colnames(cv.table) <- paste("k=", 1:ncol(cv.table), sep = "")
+  
+  return(cv.table)
+}
+
+#power_train2 = liftingtrain %>% dplyr::select(-Sex)
+
+multi.knn <- function(train, test, kn, cl, test_var){
+  m_error = NULL
+  
+  for(i in 1:kn){
+    k = knn(train = train, cl = cl, 
+            test= test, k = i)
+    m_error[i] = mean(k != test_var)
+    
+  }
+  m_error = t(as.data.frame(m_error))
+  colnames(m_error) <- paste("k=", 1:ncol(m_error), sep = "")
+  
+  return(m_error)
+}
+
+## CV KNN
+cv = multi.knn.cv(dataY = liftingtrain$y,data = liftingtrain[,-7], kn = 8, K = 5)
+cv
+## KNN Test
+knn_tst <- multi.knn(train = liftingtrain[,-7], test = liftingtest[,-7], kn = 8, cl = liftingtrain$y, 
+                    test_var = liftingtest$y)
+
+##KNN Train
+knn_tr <- multi.knn(train = liftingtrain[,-7], test = liftingtrain[,-7], kn = 8, cl = liftingtrain$y, 
+                    test_var = liftingtrain$y)
+
+## Table of Errors
+
+knn_errors <- as.data.frame(rbind(knn_tr, knn_tst, cv))
+rownames(knn_errors) = c('Train','Test', 'Cross Validation')
+
+opt_k <- which(cv == min(cv))
+opt_errors = knn_errors[,opt_k, drop = FALSE]
+
+
+final_knn = sprintf("%sfinal_knn_errs.csv", .SMP.)
+write.csv(opt_errors, file = final_knn)
+
+# Graph for all errors
+
+pdf(sprintf("./%sknn_plot.pdf", .SMP.))
+
+##plot for Original Data Errors
+
+knn_errors$type <- c('Train Error','Test Error','CV Error')
+errors_mixed_melted <- melt(knn_errors, id.vars = 'type')
+
+ggplot(errors_mixed_melted, aes(x = variable, y = value)) + geom_line(aes(color = type, group = type)) +
+  ggtitle('Original')
+
+
+dev.off()
+```
+
+
+```{r, cache=TRUE}
+
+##############################################################################################
+#### SVM ####
+##############################################################################################
+
+set.seed(9)
+
+# Compute the best tuning parameters for slack and gamma when applicable
+
+costs = exp(-2:2)
+gams = c(.01, .05, .1)
+degrees = c(2,3)
+tc <- tune.control(cross = 5)
+
+# Compute best cross-validated model
+
+svm_func <- function (x,z,costs,gams, degrees) {
+x_tune.out = tune.svm(y ~., data = liftingtrain, cost = costs, gamma = gams, degree = degrees, tunecontrol = tc, kernel = z)
+x_models <- summary(x_tune.out)
+} 
+
+# Run for each kernel type
+
+gaus_models <- svm_func(gaus, "radial", costs, gams, 0)
+lin_models <- svm_func(lin, "linear", costs, 0, 0)
+
+# Order error rates by type
+
+gaus_sum <- data.frame(gaus_models$performances) %>%
+            dplyr::mutate(Type = "Gaussian")
+lin_sum <- data.frame(lin_models$performances) %>%
+            dplyr::mutate(Type = "Linear")
+
+gaus_sum_stats <- gaus_sum[order(gaus_sum$error), ] 
+lin_sum_stats <- lin_sum[order(lin_sum$error), ] 
+
+# Create table of error rates
+
+svm_sums <- rbind(gaus_sum, lin_sum)
+
+form = sprintf("%scv_svm_ouputs.csv", .SMP.)
+write.csv(svm_sums, file = form)
+
+pdf(sprintf("./%ssvm_plot.pdf", .SMP.))
+
+final_err_plot <- 
+  ggplot(svm_sums) + 
+  facet_wrap(Type ~ gamma) +
+  geom_line(data = svm_sums %>% filter(Type == "Gaussian"), mapping = aes(x = cost, y = error)) +
+  geom_line(data = svm_sums %>% filter(Type == "Linear"), mapping = aes(x = cost, y = error)) 
+    
+  geom_line(aes(color = Type, group = Type)) 
+
+dev.off()
+
+# Compute optimal model again
+
+svm_opt <- function (x,y,costs,gams, degrees) {
+x_tune.out = tune.svm(y ~., data = liftingtrain, cost = costs, gamma = gams, degree = degrees, tunecontrol = tc, kernel = y)
+best_model <- x_tune.out$best.model
+}
+
+gaus_best <- svm_opt(gaus, "radial", costs, gams, 0)
+lin_best <- svm_opt(lin, "linear", costs, 0, 0)
+
+# Predict train and test error with optimized model
+
+pred_svm <- function(x) {
+test_error = sum(predict(x, liftingtest) != liftingtest$y) / nrow(liftingtest)
+train_error = sum(predict(x, liftingtrain) != liftingtrain$y) / nrow(liftingtrain)
+
+output_table = cbind(test_error, train_error)
+}
+
+# Take best model for each  
+
+gaus_pred_svm <- pred_svm(gaus_best)
+lin_pred_svm <- pred_svm(lin_best)
+#poly_pred_svm <- pred_svm(poly_best)
+
+# Compile final error rates
+
+svm_error_rates <- as.data.frame(rbind(gaus_pred_svm, lin_pred_svm)) %>% 
+                   dplyr::mutate(Type = "name")
+
+svm_error_rates$Type[1] <- "Gaussian"
+svm_error_rates$Type[2] <- "Linear"
+
+colnames(svm_error_rates)[1:2] <- c("Test Error", "Train Error")
+
+form = sprintf("%scv_svm.csv", .SMP.)
+write.csv(svm_error_rates, file = form)
+
+
+```
+
+
+```{r, cache=TRUE}
+
+#### Decision Trees ####
+
+maxdepth = c(0:6)
+
+idx <- sample(1:10, size = nrow(liftingtrain), replace = T)
+
+decisionMatrix = expand.grid(maxdepth = maxdepth)
+
+cv_tree <- adply(decisionMatrix, 1, function(i) {
+
+  ldply(1:10, function(set_choice) {
+
+    samp = liftingtrain[which(idx != set_choice), ]
+    fake_test = liftingtrain[-which(idx != set_choice), ]
+    tr <- party::ctree(Sex~., data=liftingtrain, control = ctree_control(maxdepth = i$maxdepth))
+    err = mean(fake_test[,58] != predict(tr, fake_test[,-58]))
+    data.frame(Error = err, set_choice = set_choice)
+
+  })
+
+}, .progress = progress_text())
+
+# Compute average error rates
+
+cv_tree_stats <- dplyr::summarise(group_by(cv_tree, maxdepth), avg_error = mean(Error))
+cv_tree_stats <- cv_tree_stats[order(cv_tree_stats$avg_error), ] 
+
+form = sprintf("%scv_tr.csv", .SMP.)
+write.csv(cv_tree_stats, file = form)
+
+# Based on the lowest mean error from our CV models, compute best model train and test error
+
+final_tr_error <- function(x,tree, pred) {
+    tr <- party::ctree(Sex~., data=liftingtrain, control = ctree_control(maxdepth = tree))
+    err = mean(x[,58] != predict(tr, x[,-58]))
+    data.frame(Error = err)
+}
+
+final_tr_train <- final_tr_error(liftingtrain, cv_tree_stats$maxdepth[1], pred)
+final_tr_test <- final_tr_error(liftingtest, cv_tree_stats$maxdepth[1], pred)
+
+final_tr_total <- as.data.frame(rbind(final_tr_train, final_tr_test)) %>%
+                  dplyr::mutate( Type = "name")
+
+final_tr_total$Type[1] <- "Train Error"
+final_tr_total$Type[2] <- "Test Error"
+
+final_tr = sprintf("%sfinal_tr_test.csv", .SMP.)
+write.csv(final_tr_total, file = final_tr)
+
+# Graph for all errors
+
+pdf(sprintf("./%strees_plot.pdf", .SMP.))
+
+final_tree_err_plot <- 
+  cv_tr$maxdepth <- as.factor(cv_tr$maxdepth)
+  ggplot(cv_tree) + 
+  geom_line(data = cv_tree, mapping = aes(x = maxdepth, y = Error, color = maxdepth)) 
+
+dev.off()
+}
+```

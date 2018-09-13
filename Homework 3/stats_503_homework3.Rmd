@@ -1,0 +1,639 @@
+---
+title: "Stats 503 Homework 3"
+author: "Sam Edds"
+date: "2/17/2018"
+output: pdf_document
+---
+  
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+
+```
+
+```{r}
+
+# Call packages #
+
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(stats)
+library(pls)
+library(lars)
+library(knitr)
+library(mixtools)
+library(mvtnorm)
+library(scatterplot3d)
+library(RDRToolbox)
+library(ggplot2)
+library(gridExtra)
+library(cluster)
+library(GGally)
+library(nnet)
+
+```
+For this analysis we examine different classification methods for our automotive data, breaking it into classes by cylinders in the engine (Y=1 if 5 cylinders or less, Y=2 if 6 cylinders, and Y=3 otherwise). We created three datasets, an original one, as is, a standardized dataset (centered and scaled), and a PCA projected dataset on the first two components.
+We break our data into train and test sets (75% / 25%) and do all of our modeling on the training dataset before passing the functional form to the train. We graph our train and test samples to check they are visually compatible, which they are. 
+```{r}
+
+#### Problem 2 ####
+
+#### Pre-processing ####
+
+# Set Working Directory
+
+setwd("/Users/samanthaedds/Desktop/Stats_503/Homework 3")
+
+# Read in data
+
+auto_data = read.table("auto-mpg.data", header = FALSE)
+
+# Change ? to NA by making V4 numeric
+
+auto_data$V4 <- as.numeric(as.character(auto_data$V4))
+colnames(auto_data)[1:9] <- c("mpg", "cylinders", "displacement", "horsepower", "weight",
+                              "acceleration", "model_year", "origin", "car_name")
+
+# Remove missing values and add in class labels
+
+auto_data <- dplyr::filter(auto_data,!is.na(horsepower)) %>%
+  mutate( y = ifelse(cylinders <= 5, 1,
+                     ifelse(cylinders == 6, 2, 3))) %>%
+  mutate( y = as.factor(y))
+
+auto_sub <- dplyr::select(auto_data, mpg, displacement, horsepower, weight, acceleration)
+
+# Center
+
+auto_sub_cent <-  scale(auto_sub, scale = FALSE)
+
+auto_sub_cent <- as.matrix(auto_sub_cent)
+
+# Perform PCA
+
+auto_pca_t <- princomp(na.omit(auto_sub_cent), cor = T)
+
+# Scale dataset to project onto since we scale it for PCA
+
+std_auto_sub <- scale(auto_sub_cent)
+
+pca_project <- as.data.frame((std_auto_sub) %*% loadings(auto_pca_t)[, 1:2])
+colnames(pca_project) <- c("V1", "V2")
+
+```
+
+```{r}
+
+#### Train/test and summary ####
+
+# Sample 75% within each class 
+
+set.seed(9)
+
+classes = lapply(levels(auto_data$y), function(x) which(auto_data$y==x))
+
+train = lapply(classes, function(class) sample(class, 0.75*length(class), replace = F))
+
+# Unlist
+
+train = unlist(train)
+
+# Split into specific datasets for analysis
+
+auto_sub <- cbind(auto_sub, auto_data$y)
+colnames(auto_sub)[6] <- c("y")
+
+autotrain = auto_sub[train,]
+autotest = auto_sub[-train,]
+
+# Split the standardized and PCA projected data based on these observations
+
+std_auto_sub <- cbind(std_auto_sub, auto_data$y)
+std_auto_sub <- as.data.frame(std_auto_sub)
+std_auto_sub <- dplyr::mutate(std_auto_sub, y = as.factor(V6))
+std_auto_sub <- dplyr::select(std_auto_sub, - V6)
+
+pca_project <- cbind(pca_project, auto_data$y)
+colnames(pca_project)[3] <- c("y")
+
+std_autotrain = std_auto_sub[train,]
+std_autotest = std_auto_sub[-train,]
+
+pca_autotrain = pca_project[train,]
+pca_autotest = pca_project[-train,]
+
+# Compare visualizations for train and test #
+
+sum_stats <- function(x, z) {
+  
+  summary(x)
+  
+  summary(z)
+  
+  ggpairs(x, columns=1:5,
+          mapping=aes(color=y),
+          diag="blank",
+          axisLabels = "internal",
+          upper=list(continuous='points'))
+  
+  ggpairs(z, columns=1:5,
+          mapping=aes(color=y),
+          diag="blank",
+          axisLabels = "internal",
+          upper=list(continuous='points'))
+}
+#sum_stats(autotrain, autotest)
+#sum_stats(std_autotrain, std_autotest)
+
+#summary(pca_autotrain)
+
+#summary(pca_autotest)
+
+#ggpairs(pca_autotrain, columns=1:3,
+#        mapping=aes(color=y),
+#        diag="blank",
+#        axisLabels = "internal",
+#        upper=list(continuous='points'))
+
+#ggpairs(pca_autotest, columns=1:3,
+#        mapping=aes(color=y),
+#        diag="blank",
+#        axisLabels = "internal",
+#        upper=list(continuous='points'))
+
+```
+Our misclassification rates show that our original and standardized data have the lowest out-of-sample error rate for both LDA and QDA. Overall QDA, which does not assume equal variance, shows lower rates of misclassification than LDA, which assumes equal variance.
+When we plot our results, we do so using MPG and Displacement for our original and standardized data because they have the most visual separation. Our plots draw two lines through which they classify our data into the three different cylinder categories. These add a visual aspect to the error rates, we can see the boundaries splitting the different classes and see that the original dataset has the least number of observations misclassified, and overall that QDA has less misclassification than LDA. The parabolic curve better hugs and separate the different groups.
+Our standardized automative data performs the same as original, because we are just centering and scaling our data, not inherently changing it.
+PCA rotates our data so our lines are now vertical (these are our two principal components that most explain our data and are a mix of all of our continuous predictors). As a result the data are much more closely aligned, all up and down the y-axis, instead of being separate much more along both axes.
+```{r}
+
+#### LDA (assumes cov matrix equal) ####
+
+# Use train data to predict
+
+analyze_lda <- function(x, z) {
+  
+  x_lda <- lda(data=x,y~.)
+  
+  x_pred <- predict(x_lda, z)
+  
+  x_table <- table(z$y, x_pred$class)
+  
+  # Sum of off-diagonals (these are misclassified) / number of data points for misclassification rate
+  
+  mis_class_error <- 1-sum(diag(table(z$y, x_pred$class)))/sum(table(z$y, x_pred$class))
+  
+}
+
+auto_lda_error <- analyze_lda(autotrain, autotest)
+std_lda_error <- analyze_lda(std_autotrain, std_autotest)
+pca_lda_error <- analyze_lda(pca_autotrain, pca_autotest)
+
+
+lda_err <- c(auto_lda_error, std_lda_error, pca_lda_error)
+lda_type <- c("Orig LDA", "Std LDA", "PCA LDA")
+lda_err_table <- data.frame(lda_type, lda_err)
+colnames(lda_err_table)[1:2] <-c("Error Rate", "Type")
+
+lda_err_table
+
+### QDA
+
+# Use train data to predict
+
+analyze_qda <- function(x, z) {
+  
+  x_qda <- qda(data=x,y~.)
+  
+  x_pred <- predict(x_qda, z)
+  
+  x_table <- table(z$y, x_pred$class)
+  
+  # Sum of off-diagonals (these are misclassified) / number of data points for misclassification rate
+  
+  mis_class_error <- 1-sum(diag(table(z$y, x_pred$class)))/sum(table(z$y, x_pred$class))
+  
+}
+
+# Check error rates
+
+auto_qda_error <- analyze_qda(autotrain, autotest)
+std_qda_error <- analyze_qda(std_autotrain, std_autotest)
+pca_qda_error <- analyze_qda(pca_autotrain, pca_autotest)
+
+qda_err <- c(auto_qda_error, std_qda_error, pca_qda_error)
+qda_type <- c("Orig qda", "Std qda", "PCA qda")
+qda_err_table <- data.frame(qda_type, qda_err)
+colnames(qda_err_table)[1:2] <-c("Error Rate", "Type")
+
+qda_err_table
+
+# For 2d plots picked mpg and displacement because these are the most visually separated 
+
+boundary_plot <- function(df, classifier, predict_function,   resolution = 500) {
+  colnames(df) = c("Var1", "Var2", "Class")
+  class_train = classifier(x = df[,1:2], y = df[,3])
+  v1 = seq(min(df[,1]), max(df[,1]), length=resolution)
+  v2 = seq(min(df[,2]), max(df[,2]), length=resolution)
+  Grid = expand.grid(Var1 = v1, Var2 = v2)
+  Grid$class = predict_function(class_train, Grid)
+  ggplot(data=df, aes(x=Var1, y=Var2, color=Class)) +
+    geom_contour(data=Grid, aes(z=as.numeric(class)),
+                 color="black",size=0.5)+
+    geom_point(size=2,aes(color=Class, shape=Class))
+}
+
+# Rearrange columns 
+
+auto_sub <- auto_sub[,c(1,2,6,3,4,5)]
+std_auto_sub <- std_auto_sub[,c(1,2,6,3,4,5)]
+
+# For orig:
+
+# LDA 
+
+lda_wrapper = function(x, y) lda(x = x, grouping = y)
+predict_wrapper = function(classifier, data) predict(classifier, data)$class
+bp_lda = boundary_plot(auto_sub[1:3], lda_wrapper, predict_wrapper) + labs(title = 'Orig Auto Data LDA', x="MPG", y="Displacement") + theme_dark()
+
+# QDA
+
+qda_wrapper = function(x, y) qda(x = x, grouping = y)
+predict_wrapper = function(classifier, data) predict(classifier, data)$class
+bp_qda = boundary_plot(auto_sub[1:3], qda_wrapper, predict_wrapper) +
+  labs(title = 'Orig Auto Data QDA', x="MPG", y="Displacement") + theme_dark()
+
+
+# Plot all of them
+
+grid.arrange(bp_lda, bp_qda, ncol=2)
+
+# For Standard:
+
+# LDA
+
+bp_std_lda = boundary_plot(std_auto_sub[1:3], lda_wrapper, predict_wrapper) + labs(title = 'Std Auto Data LDA', x="MPG", y="Displacement") + theme_dark()
+
+# QDA
+
+bp_std_qda = boundary_plot(std_auto_sub[1:3], qda_wrapper, predict_wrapper) +
+  labs(title = 'Std Auto Data QDA', x="MPG", y="Displacement") + theme_dark()
+
+
+# Plot all of them
+
+grid.arrange(bp_std_lda, bp_std_qda, ncol=2)
+
+# For PCA: 
+
+# Orig
+
+bp_pca_lda = boundary_plot(pca_project[1:3], lda_wrapper, predict_wrapper) + labs(title = 'PCA Auto Data LDA', x="PCA 1", y="PCA 2") + theme_dark()
+
+# QDA
+
+bp_pca_qda = boundary_plot(pca_project[1:3], qda_wrapper, predict_wrapper) +
+  labs(title = 'PCA Auto Data QDA', x="PCA 1", y="PCA 2") + theme_dark()
+
+
+# Plot all of them
+
+grid.arrange(bp_pca_lda, bp_pca_qda, ncol=2)
+
+```
+
+Our logistic regression error rates unsurprisingly are lowest for for our training datasets over our tests because we are fitting on train, so always have a lower error rate than for test, because we are better fitting the idiosyncracies from the train data. We notice that for our test results the lowest mean error rate is lowest for our original dataset, then standardized, and highest for our PCA data. 
+
+When compared to error rates from LDA and QDA  we see logistic regression performs a bit better for all datasets compared to LDA. Perhaps because they are not the same model constraints imposed as with LDA. For standardized and PCA the models perform about the same between QDA and logistic, and logistic performs better than even QDA for the original dataset.
+
+```{r}
+
+# Logistic Regression
+
+multi_nom = function(x,z) {
+  multi_nom <- multinom(y ~ ., data = x, trace = FALSE)
+  
+  fits <- table(predict(multi_nom, x), x$y)
+  colnames(fits)[1] <- c("fit")
+  
+  predict_train <- mean(predict(multi_nom, x, type = "class") != x$y)
+  
+  predict_test <- mean(predict(multi_nom, z, type = "class") != z$y)
+  
+  results = list(predict_train, predict_test)
+}
+
+# Run for all 3 types
+
+orig_logistic_errors <- multi_nom(autotrain, autotest)
+std_logistic_errors <- multi_nom(std_autotrain, std_autotest)
+pca_logistic_errors <- multi_nom(pca_autotrain, pca_autotest)
+
+# Format table
+
+orig_log_err <- as.data.frame(rbind(orig_logistic_errors[[1]], orig_logistic_errors[[2]]))
+colnames(orig_log_err)[1] <- c("Error Rate")
+orig_log_err <- dplyr::mutate(orig_log_err, Type = "Orig Logistic")
+orig_log_err$Type[1] <- "Orig Train Logistic"
+orig_log_err$Type[2] <- "Orig Test Logistic"
+
+
+std_log_err <- as.data.frame(rbind(std_logistic_errors[[1]], std_logistic_errors[[2]]))
+colnames(std_log_err)[1] <- c("Error Rate")
+std_log_err <- dplyr::mutate(std_log_err, Type = "Std Logistic")
+std_log_err$Type[1] <- "Std Train Logistic"
+std_log_err$Type[2] <- "Std Test Logistic"
+
+pca_log_err <- as.data.frame(rbind(pca_logistic_errors[[1]], pca_logistic_errors[[2]]))
+colnames(pca_log_err)[1] <- c("Error Rate")
+pca_log_err <- dplyr::mutate(pca_log_err, Type = "PCA Logistic")
+pca_log_err$Type[1] <- "PCA Train Logistic"
+pca_log_err$Type[2] <- "PCA Test Logistic"
+
+log_err_table <- rbind(orig_log_err, std_log_err, pca_log_err)
+
+log_err_table
+
+```
+
+We finally use KNN on our train, test, and cross-validated models. Our distance metric is chosen as Euclidean distance (as chosen by the R package, which seems reasonable). We use k-fold cross validation (choosing k = 5) to find the optimal number of nearest neighbors for each of our 3 datasets through mean error rate. We find for our original that we should choose our 5 nearest neighbors, for standardized we should choose 4, and for PCA we should choose only our nearest neighbor.
+We show our train error rates to note again that we fit much better on train, and that our CV results do not necessarily line up with our lowest mean errors for each k of train or test. Again this makes sense because we are training on multiple iterations and not trying to fit the idiosyncracies in our train data (and we do not see the test data beforehand). It is interesting to note our CV error rates vary strongly while neither our train, nor our test do. This would warrant looking into our splits and require more testing to figure out why this might be.
+Finally we will comment on different datasets.
+
+```{r, echo=FALSE}
+
+# KNN with cross-validation
+
+cv.knn<- function (y, x, kn, K, seed) {
+  n <- nrow(x)
+  set.seed(seed)
+  library(class)
+  
+  f <- ceiling(n/K)
+  s <- sample(rep(1:K, f), n)  
+  x=scale(x)
+  CV=NULL;PvsO=NULL
+  
+  for (i in 1:K) { 
+    test.index <- seq_len(n)[(s == kn)] #test data
+    train.index <- seq_len(n)[(s != kn)] #training data
+    
+    train.X <- as.data.frame(x[train.index,])
+    test.X <- as.data.frame(x[test.index,])
+    train.y <- y[train.index]
+    test.y <- as.matrix(y[test.index])
+    
+    #predicted test set y
+    knn.pred=knn(train = train.X, test = test.X, cl = train.y, k=K)
+    
+    #observed - predicted on test data 
+    error= mean(knn.pred!=test.y) 
+    
+    #error rates 
+    CV=c(CV,mean(error))
+    predvsobs=data.frame(knn.pred,test.y)
+    PvsO=rbind(PvsO,predvsobs)
+  }
+  
+  #Output
+  list(k = K,
+       knn_error_rate = mean(CV), confusion=table(PvsO[,1],PvsO[,2]), seed=seed)
+  
+}
+
+cv.knn(y=autotrain$y, x=autotrain[,-6], kn=1, K=5, seed=23)
+
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- cv.knn(y=autotrain$y, x=autotrain[,-6],kn=i, 
+                        K=5, seed=123)$knn_error_rate
+}
+
+orig_k_err <- as.data.frame(cv.error)
+orig_k_err$k <- seq.int(nrow(orig_k_err))
+
+orig_k <- which(cv.error==min(cv.error))
+#print(orig_k)
+
+# Standardized
+
+cv.knn(y=std_autotrain$y, x=std_autotrain[,-6], kn=1, K=5, seed=7)
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- cv.knn(y=std_autotrain$y, x=std_autotrain[,-6],kn=i, 
+                        K=5, seed=8)$knn_error_rate
+}
+
+std_k_err <- as.data.frame(cv.error)
+std_k_err$k <- seq.int(nrow(std_k_err))
+
+std_k=which(cv.error==min(cv.error))
+#print(std_k)
+
+# PCA
+
+cv.knn(y=pca_autotrain$y, x=pca_autotrain[,-3], kn=1, K=5, seed=88)
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- cv.knn(y=pca_autotrain$y, x=pca_autotrain[,-3],kn=i, 
+                        K=5, seed=3)$knn_error_rate
+}
+
+pca_k_err <- as.data.frame(cv.error)
+pca_k_err$k <- seq.int(nrow(pca_k_err))
+
+pca_k=which(cv.error==min(cv.error))
+#print(pca_k)
+
+# Train error function
+
+set.seed(12)
+train_knn <- function(x, z) {
+  
+  CV=NULL;PvsO=NULL
+  
+  for (i in 1:5) {
+    
+    knn.pred_train=knn(train = x, test = x, cl = z, k = i)
+    error= mean(knn.pred_train!=z)
+    
+    
+    CV=c(CV,mean(error))
+    predvsobs=data.frame(knn.pred_train,z)
+    PvsO=rbind(PvsO,predvsobs)
+  }  
+  list(knn_error_rate = mean(CV))
+}
+
+# Orig
+
+orig_err_train <- train_knn(x = autotrain[,-6], z = autotrain$y)
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- train_knn(z = autotrain$y, x=autotrain[,-6])$knn_error_rate
+}
+
+orig_train_k_err <- as.data.frame(cv.error)
+orig_train_k_err$k <- seq.int(nrow(orig_train_k_err))
+
+# Std
+
+std_err_train <- train_knn(x = std_autotrain[,-6], z = std_autotrain$y)
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- train_knn(z = std_autotrain$y, x=std_autotrain[,-6])$knn_error_rate
+}
+
+std_train_k_err <- as.data.frame(cv.error)
+std_train_k_err$k <- seq.int(nrow(std_train_k_err))
+
+# PCA
+
+pca_err_train <- train_knn(x = pca_autotrain[,-3], z = pca_autotrain$y)
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- train_knn(z = pca_autotrain$y, x=pca_autotrain[,-6])$knn_error_rate
+}
+
+pca_train_k_err <- as.data.frame(cv.error)
+pca_train_k_err$k <- seq.int(nrow(pca_train_k_err))
+
+# Test error function
+
+test_knn <- function(x, y, z, a, K) {
+  knn.pred_test=knn(train = x, test = z, cl = y, k = K)
+  error= mean(knn.pred_test!=a)
+  
+}  
+
+
+
+# Test errors
+
+set.seed(18)
+test_knn <- function(x, y, z, a) {
+  
+  CV=NULL;PvsO=NULL
+  
+  for (i in 1:5) {
+    
+    knn.pred_test=knn(train = x, test = z, cl = y, k = i)
+    error= mean(knn.pred_test!=a)
+    
+    
+    CV=c(CV,mean(error))
+    predvsobs=data.frame(knn.pred_test,z)
+    PvsO=rbind(PvsO,predvsobs)
+  }  
+  list(knn_error_rate = mean(CV))
+}
+
+# Orig
+
+orig_err_test <- test_knn(x = autotrain[,-6], y = autotrain$y, z = autotest[-6], a = autotest$y)
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- test_knn(x = autotrain[,-6], y = autotrain$y, z = autotest[-6], a = autotest$y)$knn_error_rate
+}
+
+orig_test_k_err <- as.data.frame(cv.error)
+orig_test_k_err$k <- seq.int(nrow(orig_test_k_err))
+
+# Std 
+
+std_err_test <- test_knn(x = std_autotrain[,-6], y = std_autotrain$y, z = std_autotest[-6], a = std_autotest$y)
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- test_knn(x = std_autotrain[,-6], y = std_autotrain$y, z = std_autotest[-6], a = std_autotest$y)$knn_error_rate
+}
+
+std_test_k_err <- as.data.frame(cv.error)
+std_test_k_err$k <- seq.int(nrow(std_test_k_err))
+
+# PCA
+
+pca_err_test <- test_knn(x = pca_autotrain[,-3], y = pca_autotrain$y, z = pca_autotest[-3], a = pca_autotest$y)
+
+cv.error=NULL
+for (i in 1:5) {
+  cv.error[i] <- test_knn(x = pca_autotrain[,-6], y = pca_autotrain$y, z = pca_autotest[-6], a = pca_autotest$y)$knn_error_rate
+}
+
+pca_test_k_err <- as.data.frame(cv.error)
+pca_test_k_err$k <- seq.int(nrow(pca_test_k_err))
+
+# Table for all errors
+
+orig_k_err <- dplyr::rename(orig_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "Orig CV")
+
+std_k_err <- dplyr::rename(std_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "Std CV")
+
+pca_k_err <- dplyr::rename(pca_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "PCA CV")
+
+orig_train_k_err <- dplyr::rename(orig_train_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "Orig train")
+
+std_train_k_err <- dplyr::rename(std_train_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "Std train")
+
+pca_train_k_err <- dplyr::rename(pca_train_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "PCA train")
+
+orig_test_k_err <- dplyr::rename(orig_test_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "Orig Test")
+
+std_test_k_err <- dplyr::rename(std_test_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "Std Test")
+
+pca_test_k_err <- dplyr::rename(pca_test_k_err, Error_Rate = cv.error) %>%
+  dplyr::mutate(Type = "PCA Test")
+
+final_error_table <- rbind(orig_k_err, std_k_err, pca_k_err, orig_train_k_err, 
+                           std_train_k_err, pca_train_k_err, orig_test_k_err, std_test_k_err,
+                           pca_test_k_err)
+
+final_error_table <- final_error_table[order(final_error_table$Type), ]
+
+orig_error_table <- final_error_table[1:15,]
+pca_error_table <- final_error_table[16:30,]
+std_error_table <- final_error_table[31:45,]
+```
+
+```{r}
+# Plot
+
+#final_err_plot <- ggplot(final_error_table, aes(x = k, y = Error_Rate)) +geom_line(aes(color = #Type, group = Type))
+#final_err_plot + labs(x="K values", y="Error Rates",
+#                      title="All Error Rates")
+
+orig_err_plot <- ggplot(orig_error_table, aes(x = k, y = Error_Rate)) +geom_line(aes(color = Type, group = Type))
+orig_err_plot + labs(x="K values", y="Error Rates",
+                     title="Orig Error Rates")
+
+std_err_plot <- ggplot(std_error_table, aes(x = k, y = Error_Rate)) +geom_line(aes(color = Type, group = Type))
+std_err_plot + labs(x="K values", y="Error Rates",
+                    title="Std Error Rates")
+
+pca_err_plot <- ggplot(pca_error_table, aes(x = k, y = Error_Rate)) +geom_line(aes(color = Type, group = Type))
+pca_err_plot + labs(x="K values", y="Error Rates",
+                    title="PCA Error Rates")
+
+```
+
+Our PCA results have extremely low test errors (remember the optimal KNN is 1), across the board, and are the lowest of the datasets. This is true for train and test. For our standardized results they have higher error rates than PCA, but somehow the test have lower error rates than train which doesn’t seem plausible. Finally, our original error rates have the highest test error rates.
+These results are fairly different from our logistic and LDA/QDA results in which the original data have the lowest error rates, and PCA the highest. Accuracy can be impacted by the different methods, for example, KNN is very localized, while LDA/QDA assume a Gaussian model, and logistic regression is conditional. This leads to different error rates.
+Similarly, our choice of dataset, if we center and scale our results, or if we use PCA and maximize variance, all give us different optimization answers.
+Finally, we have a small dataset so because we have low, close error rates, this could be the difference between classifying one more point as an error. Broadly speaking it is difficult to have too many takeaways because we have a small dataset and with different seeds our results shift.

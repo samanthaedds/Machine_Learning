@@ -1,0 +1,375 @@
+---
+title: "Stats 503 Homework 5"
+author: "Sam Edds"
+date: "4/17/2018"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+
+```
+
+```{r}
+
+# Call packages #
+
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(stats)
+library(pls)
+library(lars)
+library(knitr)
+library(mixtools)
+library(mvtnorm)
+library(scatterplot3d)
+library(RDRToolbox)
+library(ggplot2)
+library(gridExtra)
+library(cluster)
+library(GGally)
+library(nnet)
+library(ggdendro)
+library(factoextra)
+library(mclust)
+library(plyr)
+```
+
+For this analysis we perform cluster analysis on the crabs dataset, which examines Blue and Orange crab species, by sex, and by traits (frontal lobe size, rear width, carapace length and width, and body depth). We examine how our results classify for both sex and species.
+
+We first convert all our continuous measures into centimeters and compute the distance matrix. We also use MDS to output two variables so we can plot our results in 2 dimensions.
+
+
+
+```{r}
+
+# Set Working Directory
+
+setwd("/Users/samanthaedds/Desktop/Stats_503/Homework 5")
+
+# Read in data
+
+crabs_data = read.table("crabs.txt", header = TRUE)
+
+require(cluster)
+
+# Convert mm to cm 
+crabs_data <- crabs_data %>%
+              dplyr::mutate( FL = FL/10, RW = RW/10)
+
+crabs_std_data <-crabs_data %>% dplyr::select(-Species, -Sex)
+
+# Compute MDS to plot against
+
+# Question 2
+
+# Part A: Recovering the gram matrix
+
+# Read in dataset
+
+crabs_std_dis_euc <- as.matrix(dist(crabs_std_data, method = "euclidean"))
+crabs_std_dis_man <- as.matrix(dist(crabs_std_data, method = "manhattan"))
+crabs_std_dis_gow <-  as.matrix(daisy(crabs_data, metric = "gower"))
+
+z_final <- as.data.frame(cmdscale(crabs_std_dis_euc, k = 2))
+
+
+```
+
+Initially we perform hierarchical clustering using single, average, and complete methods, the distances euclidean, manhattan, and gower, and on 2-8 potential clusters. We examine our best results and notice that it is 2 clusters with Euclidean distance, and complete linkage.We notice our results are pretty consistent within linkage type, and distance seems to matter less than linkage type.
+
+Our silhouette plot shows our best result, which has the highest average silhouette width. This helps measure the space between clusters, with more space being better. 
+```{r}
+
+#### Hierarchical clustering 1a ####
+
+meth = c('single', 'average', 'complete')
+dis = c('euclidean', 'manhattan', 'gower')
+clusters = c(2:8)
+
+decisionMatrix = expand.grid(meth = meth, dis = dis, clusters = clusters)
+
+cluster_res <- adply(decisionMatrix, 1, function(i) {
+  
+  ldply(1:1, function(set_choice) {
+    
+    h_clust= agnes(crabs_std_data, diss=FALSE, metric = i$dis, method=i$meth)
+    output = as.matrix(silhouette(cutree(h_clust, k=i$clusters), crabs_std_dis_euc, border = NA))
+  })
+  
+})
+
+# Compute mean silhouette width by cluster
+hier_cluster_table <- cluster_res %>%
+  group_by(meth, dis, clusters) %>%
+  dplyr::summarize(n = n(),
+                   avg_width = (mean(sil_width, na.rm = TRUE)))
+
+# Plot these to see best choice
+  ggplot(hier_cluster_table) + 
+  facet_wrap(meth ~ dis) +
+  geom_line(data = hier_cluster_table %>% filter(meth == "single"), mapping = aes(x = clusters, y = avg_width)) +
+  geom_line(data = hier_cluster_table %>% filter(meth == "average"), mapping = aes(x = clusters, y = avg_width)) +
+  geom_line(data = hier_cluster_table %>% filter(meth == "complete"), mapping = aes(x = clusters, y = avg_width))
+    
+  geom_line(aes(color = meth, group = meth)) 
+
+```
+
+```{r}
+# Find best silhouette 
+hier_cluster_table <- hier_cluster_table[order(hier_cluster_table$dis),]
+best_one <- hier_cluster_table[order(desc(hier_cluster_table$avg_width)), ] 
+best_one <- best_one[1,]
+
+
+# Run this only
+best_hier= agnes(crabs_std_data, diss=FALSE, metric = best_one$dis, method=best_one$meth)
+best_hier_output = as.matrix(silhouette(cutree(best_hier, k=best_one$clusters), crabs_std_dis_euc, border = NA))
+
+# Plot 
+fviz_silhouette(best_hier_output, title = "Best Hierarchical Euclidean Distance Silhouette Plot")
+
+```
+
+For K-Means we initially compute an elbow plot to determine the number of optimal clusters, which appears to be 4 (K-Means only uses Euclidean distances and we tested k=2 to 15). 
+
+```{r}
+
+#### K-Means 1a ####
+
+# Calculate the within cluster variation
+
+weightedss <- (nrow(crabs_std_data)-1)*sum(apply(crabs_std_data,2,var))
+  for (i in 2:15) weightedss[i] <- sum(kmeans(crabs_std_data,
+                                       centers=i)$withinss)
+weightedss_frame <- as.data.frame(weightedss)
+weightedss_frame$clusters <- 1:15
+
+# Plot
+kmeans_euc_plot <- ggplot(data=weightedss_frame, aes(x=clusters, y=weightedss)) +
+    geom_line() +
+    geom_point(size=2) 
+
+kmeans_euc_plot + labs( x="Number of Clusters",
+     y="Within groups sum of squares",
+     title="Potential Optimal Number of Clusters")
+
+```
+
+We initially use BIC criteria for mixture models and find 4 clusters is again optimal, using the EEV model. 
+```{r}
+
+#### Mixture Models 1a ####
+
+set.seed(152)
+
+BIC <- mclustBIC(crabs_std_data)
+plot(BIC, title = "BIC plot")
+summary(BIC, parameters = TRUE)
+```
+
+Taking our BIC model from part 1, we now use 4 clusters with each of three methods to compare our results against sex and species. For hierarchical clustering we see our resulting silhouette plots differ among distances. Euclidean distance (average linkage) performs the best, followed by Manhattan (complete linkage), and then Gower (also complete). Again, higher average width being better. 
+
+```{r}
+# Based on the BIC model in 1 we use 4 clusters to try to plot our Sex and Gender against #
+
+#### Hierarchical clustering ####
+
+meth = c('single', 'average', 'complete')
+dis = c('euclidean', 'manhattan', 'gower')
+
+set.seed(129)
+
+decisionMatrix1 = expand.grid(meth = meth, dis = dis, clusters = 4)
+
+cluster_opt <- adply(decisionMatrix1, 1, function(i) {
+  
+  ldply(1:1, function(set_choice) {
+    
+    h_clust= agnes(crabs_std_data, diss=FALSE, metric = i$dis, method=i$meth)
+    output = as.matrix(silhouette(cutree(h_clust, k=4), crabs_std_dis_euc, border = NA))
+  })
+  
+})
+
+# Compute mean silhouette width by cluster
+hier_cluster_opt_table <- cluster_opt %>%
+  group_by(meth, dis) %>%
+  dplyr::summarize(n = n(),
+                   avg_width = (mean(sil_width, na.rm = TRUE)))
+
+hier_cluster_opt_table <- hier_cluster_opt_table[order(hier_cluster_opt_table$dis),]
+opt_best_one <- hier_cluster_opt_table[order(desc(hier_cluster_opt_table$avg_width)), ] 
+man_best_one <- opt_best_one[1,]
+euc_best_one <- opt_best_one[2,]
+gower_best_one <- opt_best_one[3,]
+
+# Run this only
+best_hier_man= agnes(crabs_std_data, diss=FALSE, metric = man_best_one$dis, method=man_best_one$meth)
+best_hier_man_output = as.matrix(silhouette(cutree(best_hier_man, k=4), crabs_std_dis_man, border = NA))
+
+best_hier_euc= agnes(crabs_std_data, diss=FALSE, metric = euc_best_one$dis, method=euc_best_one$meth)
+best_hier_euc_output = as.matrix(silhouette(cutree(best_hier_euc, k=4), crabs_std_dis_euc, border = NA))
+
+best_hier_gow= agnes(crabs_std_data, diss=FALSE, metric = gower_best_one$dis, method=gower_best_one$meth)
+best_hier_gow_output = as.matrix(silhouette(cutree(best_hier_gow, k=4), crabs_std_dis_gow, border = NA))
+
+# Plot- all roughly the same-average is better than complete or otherwise 
+fviz_silhouette(best_hier_man_output, title = "Hierarchical Manhattan Distance Silhouette Plot")
+
+fviz_silhouette(best_hier_euc_output, title = "Hierarchical Euclidean Distance Silhouette Plot")
+fviz_silhouette(best_hier_gow_output, title = "Hierarchical Gower Distance Silhouette Plot")
+```
+
+We then plot the actual species and sex variables so we can see how well our classification performs. We purposely break out our graphs by species and sex to allow us to more clearly examine our results. As we can see our results contain observations classified in 3-4 clusters, so it is clear our clustering performs poorly across all of our optimal types. Ideally there would be one color per cluster, but this is not at all the case. Overall, hierarchical clustering does poorly.
+
+```{r}
+# Plot by actual Species and Sex
+
+actual_mds <- cbind(crabs_data$Species, crabs_data$Sex, z_final)
+colnames(actual_mds)[1:2] <- c("species", "sex")
+
+actual_mds_plot <- actual_mds %>%
+                    dplyr::mutate( species = case_when(species == 1 ~ "Blue",
+                                                       species == 2 ~ "Orange"),
+                                   sex = case_when(sex == 1 ~ "Male",
+                                                   sex == 2 ~ "Female")) %>%
+                     dplyr::mutate( species = as.factor(species), sex = as.factor(sex))
+
+actual_sex_plot <-  ggplot(actual_mds_plot) + 
+                 geom_point(aes(x = V2, y = V1, color = sex)) 
+actual_sex_plot + labs(x = "V2", y = "V1", title = "Actual Gender MDS Plot")
+
+actual_species_plot <-  ggplot(actual_mds_plot) + 
+                 geom_point(aes(x = V2, y = V1, color = species)) 
+actual_species_plot + labs(x = "V2", y = "V1", title = "Actual Species MDS Plot")
+
+# Take the clusters and cluster by these for Species and Sex
+
+# Manhattan
+cluster_man <- cluster_opt %>% dplyr::filter(meth == "average", dis == "manhattan") %>%
+               dplyr::select(cluster)
+
+cluster_man_full <- cbind(crabs_data$Species, crabs_data$Sex, cluster_man, z_final)
+colnames(cluster_man_full)[1:2] <- c("species", "sex")
+
+clus_man_plot <- cluster_man_full %>%
+                    dplyr::mutate( species = case_when(species == 1 ~ "Blue",
+                                                       species == 2 ~ "Orange"),
+                                   sex = case_when(sex == 1 ~ "Male",
+                                                   sex == 2 ~ "Female")) %>%
+                     dplyr::mutate( species = as.factor(species), sex = as.factor(sex),
+                                    cluster = as.factor(cluster))
+
+# Euclidean
+cluster_euc <- cluster_opt %>% dplyr::filter(meth == "average", dis == "euclidean") %>%
+               dplyr::select(cluster)
+
+cluster_euc_full <- cbind(crabs_data$Species, crabs_data$Sex, cluster_euc, z_final)
+colnames(cluster_euc_full)[1:2] <- c("species", "sex")
+
+clus_euc_plot <- cluster_euc_full %>%
+                    dplyr::mutate( species = case_when(species == 1 ~ "Blue",
+                                                       species == 2 ~ "Orange"),
+                                   sex = case_when(sex == 1 ~ "Male",
+                                                   sex == 2 ~ "Female")) %>%
+                     dplyr::mutate( species = as.factor(species), sex = as.factor(sex),
+                                    cluster = as.factor(cluster))
+
+# Gower
+cluster_gow <- cluster_opt %>% dplyr::filter(meth == "average", dis == "gower") %>%
+               dplyr::select(cluster)
+
+cluster_gow_full <- cbind(crabs_data$Species, crabs_data$Sex, cluster_gow, z_final)
+colnames(cluster_gow_full)[1:2] <- c("species", "sex")
+
+clus_gow_plot <- cluster_gow_full %>%
+                    dplyr::mutate( species = case_when(species == 1 ~ "Blue",
+                                                       species == 2 ~ "Orange"),
+                                   sex = case_when(sex == 1 ~ "Male",
+                                                   sex == 2 ~ "Female")) %>%
+                     dplyr::mutate( species = as.factor(species), sex = as.factor(sex),
+                                    cluster = as.factor(cluster))
+# Plots
+plot_man <- ggplot(clus_man_plot) + 
+            facet_wrap(sex ~ species) +
+            geom_point(aes(x = V2, y = V1, color = cluster)) 
+    
+plot_man + labs(x = "V2", y = "V1", title = "Hierarchical Manhattan Distance with MDS Plot")
+
+plot_euc <- ggplot(clus_euc_plot) + 
+            facet_wrap(sex ~ species) +
+            geom_point(aes(x = V2, y = V1, color = cluster)) 
+    
+plot_euc + labs(x = "V2", y = "V1", title = "Hierarchical Euclidean Distance with MDS Plot")
+
+plot_gow <- ggplot(clus_gow_plot) + 
+            facet_wrap(sex ~ species) +
+            geom_point(aes(x = V2, y = V1, color = cluster)) 
+    
+plot_gow + labs(x = "V2", y = "V1", title = "Hierarchical Gower Distance with MDS Plot")
+```
+
+We move on to see how well our K-Means classifies by sex and species. Again we can see there is almost a perfect spread of all 4 cluster types when we expect one to be in each species, sex box. Our K-means results are just as bad as our hierarchical clustering results. 
+```{r}
+#### K-Means ####
+
+# Compute best cluster
+best_cluster <- kmeans(crabs_std_dis_euc, centers = 4)
+
+kmeans_best <- cbind(crabs_data$Species, crabs_data$Sex, best_cluster$cluster, z_final)
+colnames(kmeans_best)[1:3] <- c("species", "sex", "cluster")
+
+kmeans_best <- kmeans_best %>%
+                    dplyr::mutate( species = case_when(species == 1 ~ "Blue",
+                                                       species == 2 ~ "Orange"),
+                                   sex = case_when(sex == 1 ~ "Male",
+                                                   sex == 2 ~ "Female")) %>%
+                     dplyr::mutate( species = as.factor(species), sex = as.factor(sex),
+                                    cluster = as.factor(cluster))
+# Silhouette plots
+
+kmeans_best_sil <- silhouette(best_cluster$cluster, crabs_std_dis_euc)
+fviz_silhouette(kmeans_best_sil, title = "K-Means Euclidean Distance Silhouette Plot")
+
+# Sex and Species plots
+
+kmeans_best_plot <-  ggplot(kmeans_best) + 
+                     facet_wrap(sex ~ species) +
+                     geom_point(aes(x = V2, y = V1, color = cluster)) 
+
+kmeans_best_plot + labs(x = "V2", y = "V1", title = "K-Means Euclidean Distance with MDS Plot")
+```
+
+Finally, with mixture models using BIC, we do a decent job classifying by sex and species. We correctly classify all, but one orange female (incorrectly classifying a few orange males only), and we do slightly worse among the blue species. For the blue species, we classify a number of females as males, but not vice versa. These results look dramatically better than the other types of clustering. This may be a result of the EM algorithm iterations which does a better job than the random assignment then iteration of K-Means or hierarchical clustering. 
+
+```{r}
+#### Mixture models ####
+  
+
+mm <- Mclust(crabs_std_data, x = BIC)
+
+mm_best <- cbind(crabs_data$Species, crabs_data$Sex, mm$classification, z_final)
+colnames(mm_best)[1:3] <- c("species", "sex", "cluster")
+
+mm_best <- mm_best %>%
+                    dplyr::mutate( species = case_when(species == 1 ~ "Blue",
+                                                       species == 2 ~ "Orange"),
+                                   sex = case_when(sex == 1 ~ "Male",
+                                                   sex == 2 ~ "Female")) %>%
+                     dplyr::mutate( species = as.factor(species), sex = as.factor(sex),
+                                    cluster = as.factor(cluster))
+
+# Sex and Species plots
+
+mm_best_plot <-  ggplot(mm_best) + 
+                 facet_wrap(sex ~ species) +
+                 geom_point(aes(x = V2, y = V1, color = cluster)) 
+
+mm_best_plot + labs(x = "V2", y = "V1", title = "Mixture Models Euclidean Distance with MDS Plot")
+```

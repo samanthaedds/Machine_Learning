@@ -1,0 +1,364 @@
+---
+title: "Stats 503 Homework 2"
+author: "Sam Edds"
+date: "2/8/2018"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+
+```
+
+```{r}
+
+# Call packages #
+
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(stats)
+library(pls)
+library(lars)
+library(knitr)
+library(mixtools)
+library(mvtnorm)
+library(scatterplot3d)
+library(RDRToolbox)
+library(ggplot2)
+library(gridExtra)
+library(cluster)
+library(GGally)
+
+```
+
+## 2. MDS-by-hand
+
+We use multi-dimensional scaling to examine the distances between 10 cities at a reduced dimension. This technique is useful because it can handle not only quantitative, but categorical data as well. Additionally it does not make any assumptions, such as the data are from a Gaussian distribution. To analyze multi-dimensional scaling we first double-centering our data, along both the rows and the columns. With this done we can just take the corresponding eigenvectors and square-root of the eigenvalues we want. In this case we choose 2 because want to be able to graph our data in an easy to interpret and visual manner, which is easiest with two dimension. We plot these on a graph, rotating them to represent a map of the United States. We can see just as with a map of the US, New York is the Northeastern most city and Miami the southeastern most city. Chicago is more towards the center, and Seattle is the most Northwestern city. The distances are preserved and we can read our cities as a map of the US, with the relative distances clear because of the double-scaling. Because of this we also note that New York and Washington, DC are relatively close together, and closer than San Francisco and Los Angeles, just as in reality.
+
+```{r}
+
+# Question 2
+
+# Part A: Recovering the gram matrix
+
+# Read in dataset
+
+D <-as.matrix(UScitiesD)
+
+# Calculate Gram matrix G=-1/2(I-1/n11transpose)D(I-1/n11transpose)
+
+I = diag(10)
+
+one_vec = c(1,1,1,1,1,1,1,1,1,1)
+
+n = 10
+
+gram = -.5*(I-((1/n)*(one_vec%*%t(one_vec)))) %*% D %*% (I-((1/n)*(one_vec%*%t(one_vec))))
+
+z_eigen <- eigen(gram, symmetric = TRUE)
+
+z_val <- sqrt(diag(z_eigen$values[1:2]))
+
+z_vec <- (z_eigen$vectors[,1:2])
+
+z_final <- as.data.frame(z_vec %*% z_val)
+
+z_final <- dplyr::rename(z_final, comp_1 = V1, comp_2 = V2)
+
+# Plot
+
+cities_name <- cmdscale(D, k=1)
+
+z_final <- cbind(cities_name, z_final)
+
+z_final <- dplyr::select(z_final, comp_1, comp_2)
+
+mds_graph <- ggplot(z_final, aes(label = rownames(z_final), x = -comp_1, y = -comp_2)) + geom_point(color = "maroon4") + geom_text(label = rownames(z_final)) + scale_x_continuous(limits = c(-30,30))
+mds_graph + labs(x="West <> East", y="South <> North",
+                    title="Classical MDS")
+
+```
+
+We next examine what happens to our map when we raise our distance matrix to the square root, and when we square it. Something we do in all of our graphs is to have them mimic a graph of the United States; our distances are preserved and we are just rotating our data to be more interpretable. 
+
+We notice when we square the distances our cities become much further apart. Chicago moves further North and closer to Washington, DC, while Miami moves further South and more even with Houston. Our other cities maintain their relative positioning. This makes sense because we are squaring each component of our distance, and then rotating it back to the original map "position".
+
+When we take the square-root of the distances our cities become much closer together, and rotate about the x-axis (again we rotate back to the original positioning to make our graph more like a map of the United States and more comparable to our results.) We notice compared to an actual map of the United States Seattle is too far East and Chicago is now too far South.
+
+
+```{r}
+
+# Part B
+
+## Notice when you square the distances become further apart, but maintain their relative positioning, aside from Denver and San Francisco, cities near the 0 dimension in X switch. Miami
+# Should be further South? 
+
+## When you half them the scale become closer together, and rotate about the x axis...rotate back
+# Seattle too far East, Chicago too far south
+
+# Raise to the square root
+
+d_dist <- D ^ (.5)
+
+# Calculate Gram matrix G=-1/2(I-1/n11transpose)D(I-1/n11transpose)
+
+gram_mat = -.5*(I-((1/n)*(one_vec%*%t(one_vec)))) %*% d_dist %*% (I-((1/n)*(one_vec%*%t(one_vec))))
+
+z_dist_eigen <- eigen(gram_mat, symmetric = TRUE)
+
+z_dist_val <- sqrt(diag(z_dist_eigen$values[1:2]))
+
+z_dist_vec <- (z_dist_eigen$vectors[,1:2])
+
+z_dist_final <- as.data.frame(z_dist_vec %*% z_dist_val)
+
+z_dist_final <- dplyr::rename(z_dist_final, comp_1 = V1, comp_2 = V2) 
+
+# Plot
+
+z_dist_final <- cbind(cities_name, z_dist_final)
+z_dist_final <- dplyr::select(z_dist_final, comp_1, comp_2)
+
+mds_dist_graph = ggplot(z_dist_final, aes(label = rownames(z_dist_final), x = -comp_1, y = comp_2)) + geom_point(color = "maroon4") + geom_text(label = rownames(z_dist_final))  + scale_x_continuous(limits = c(-3.5,3.5))
+mds_dist_graph + labs(x="West <> East", y="South <> North", title="Classical MDS Square-root Distance")
+```
+
+```{r}
+# Now square it
+
+d_sq <- D ^ (2)
+
+# Calculate Gram matrix G=-1/2(I-1/n11transpose)D(I-1/n11transpose)
+
+gram_sq_mat = -.5*(I-((1/n)*(one_vec%*%t(one_vec)))) %*% d_sq %*% (I-((1/n)*(one_vec%*%t(one_vec))))
+
+z_sq_eigen <- eigen(gram_sq_mat, symmetric = TRUE)
+
+z_sq_val <- sqrt(diag(z_sq_eigen$values[1:2]))
+
+z_sq_vec <- (z_sq_eigen$vectors[,1:2])
+
+z_sq_final <- as.data.frame(z_sq_vec %*% z_sq_val)
+
+z_sq_final <- dplyr::rename(z_sq_final, comp_1 = V1, comp_2 = V2) 
+
+# Plot
+
+z_sq_final <- cbind(cities_name, z_sq_final)
+z_sq_final <- dplyr::select(z_dist_final, comp_1, comp_2)
+
+mds_sq_graph = ggplot(z_sq_final, aes(label = rownames(z_sq_final), x = -comp_1, y = -comp_2)) + geom_point(color = "maroon4") + geom_text(label = rownames(z_sq_final))
+mds_sq_graph + labs(x="West <> East", y="South <> North", title="Classical MDS Square Distance")
+
+```
+\pagebreak 
+
+## 3. Report comparing Principal Component Analysis, Factor Analysis, and Multi-dimensional Scaling
+
+We conduct a study examining the difference between principal components analysis, factor analysis, and multi-dimensional scaling using automotive data from 398 vehicles (392 with complete information). We measure their model year, origin, model, miles per gallon (mpg), number of cylinders in the engine, displacement, horsepower, weight, and acceleration. Our exploratory data analysis focuses on providing a broad summary to understand these data holistically and specific relationships between variables. 
+
+Our initial exploration shows we have vehicle data from 1970-1982, for a wide variety of vehicles coming from the United States, Western Europe, and Japan. We can see there are 3 to 8 cylinder engines (mostly 4, 6, or 8 cylinder), and a wide range in horsepower (46 to 230 hp).
+
+We examine the histograms and scatterplots for our quantitative variables to look for potential signs of dimension reduction. We notice positive correlation between displacement, horsepower and weight and very little correlation between acceleration and mpg. Interestingly, our first three variables individually are all negatively correlated with acceleration and mpg. As a result we expect PCA, factor analysis, and multi-dimensional scaling will allow us to help reduce some dimensionality in our data. 
+
+
+```{r}
+
+#### Problem 5 ####
+
+# Set Working Directory
+
+setwd("/Users/samanthaedds/Desktop/Stats_503/Homework 2")
+
+# Read in data
+
+auto_data = read.table("auto-mpg.data", header = FALSE)
+
+# Change ? to NA by making V4 numeric
+
+auto_data$V4 <- as.numeric(as.character(auto_data$V4))
+colnames(auto_data)[1:9] <- c("mpg", "cylinders", "displacement", "horsepower", "weight",
+                              "acceleration", "model_year", "origin", "car_name")
+
+# Subset only continuous variables
+
+auto_data <- dplyr::filter(auto_data,!is.na(horsepower))
+
+auto_sub <- dplyr::select(auto_data, mpg, displacement, horsepower, weight, acceleration)
+
+# Center
+
+auto_sub <-  scale(auto_sub, scale = FALSE)
+
+auto_sub <- as.matrix(auto_sub)
+
+# Perform PCA
+
+auto_pca_t <- princomp(na.omit(auto_sub), cor = T)
+
+# Scale dataset to project onto since we scale it for PCA
+
+scale_auto_sub <- scale(auto_sub)
+
+pca_project <- as.data.frame((scale_auto_sub) %*% loadings(auto_pca_t)[, 1:2])
+colnames(pca_project) <- c("V1", "V2")
+
+# Add back in categorical variables
+
+pca_project <- cbind(pca_project, auto_data[, c("cylinders", "model_year", "car_name", "origin")])
+
+#Plot projections in 2 dim (try different categorical variables...cylinders...)
+
+org_plot <- ggplot(data = pca_project) + 
+  geom_point(aes(x = V1, y = V2, col = origin)) 
+org_plot + labs(title = "PCA by Origin", x="Factor 1", y="Factor 2")
+
+cyl_plot <- ggplot(data = pca_project) + 
+  geom_point(aes(x = V1, y = V2, col = cylinders))
+cyl_plot + labs(title = "PCA by Cylinders", x="Factor 1", y="Factor 2")
+
+```
+
+We make a biplot to check our intuition from the factor loadings and notice that weight and mpg move in the opposite directions, while weight, horsepower, and displacement all move in similar directions. Acceleration moves in yet another direction, orthogonal to weight and mpg. This is the most interesting plot because we can visual the different directions in which our variables load for the two principal components. Weight, horsepower, and displacement seem related in that horsepower and displacement are typically higher when vehicles weigh more. Gas mileage on the other hand is inversely related to these metrics, while acceleration is typically less dependent on these metrics. Finally, acceleration and horsepower are inversely related, which seems surprising. 
+
+```{r}
+
+#### Biplot ####
+
+biplot(auto_pca_t, scale = 0)
+
+```
+
+While PCA optimizes for the greatest variance, Factor Analysis ensures that residuals are uncorrelated so the error and loadings are indepedent. With factor analysis we are examining the latent factors that impact our automotive data. For this analysis we test different rotations and examine our factor loadings in order to decide which rotation to use in order to help us determine the number of factors. From PCA we lean towards two, and then examine our factor loadings to create more intuition. We test the promax and varimax rotations, as well as no rotation. Since promax is a more extreme version of varimax (exacerbating the differences to make smaller values smaller and larger ones larger), it makes for the easiest interpretation of the factor loadings because our weights are most clear. With this in mind we choose promax, and two factors, again for ease of intepretability. 
+
+We can see that our first factor weights most heavily on weight, and heavily on displacement, as well as mpg (which is directionally different from displacement and weight). Interestingly, acceleration is essentially a non-factor, and horsepower somewhat less important that the three big variables. Our second factor places almost all of the weight on acceleration and the other variables are essentially ignored. The second factor is similar in essence to the PCA loadings which had most of the weight placed on acceleration, while the first factors are a bit different. For PCA these were loaded almost evenly, and with displacement, horsepower, and weight directionally the same and opposite weight and acceleration. For FA however, we mpg moves directionally different from the other variables and weight is more heavily weighted compared to the other variables. This may be due to the different optimization methods mentioned above. This is most easily seen in our graph, showing the different loadings plotted, with horsepower displacement and weight moving in the same direction, which is very different from mpg and acceleration. 
+
+```{r}
+# Factor Analysis
+
+# Set Working Directory
+
+setwd("/Users/samanthaedds/Downloads")
+
+# Read in data
+
+auto_data = read.table("auto-mpg.data", header = FALSE)
+
+# Change ? to NA by making V4 numeric
+
+auto_data$V4 <- as.numeric(as.character(auto_data$V4))
+colnames(auto_data)[1:9] <- c("mpg", "cylinders", "displacement", "horsepower", "weight",
+                              "acceleration", "model_year", "origin", "car_name")
+
+auto_data <- dplyr::filter(auto_data,!is.na(horsepower))
+
+# Subset data to remove categorical
+
+auto_sub <- dplyr::select(auto_data, mpg, displacement, horsepower, weight, acceleration) %>%
+            dplyr::filter(!is.na(horsepower))
+
+cor(auto_sub)
+
+#Tries to maximize something large, makes larger, small makes smaller. Useful for interp.
+#Not orthogonal rotation
+
+data_FAnone = factanal(x = auto_sub, factors=2, rotation="none")
+
+data_FAvar = factanal(x = auto_sub, factors=2, rotation="varimax")
+
+data_FApro = factanal(x = auto_sub, factors=2, rotation="promax")
+
+
+# Look at different loadings based on different rotations
+
+cbind(data_FAnone$loadings[,1], data_FAvar$loadings[,1], data_FApro$loadings[,1])
+
+cbind(data_FAnone$loadings[,2], data_FAvar$loadings[,2], data_FApro$loadings[,2])
+
+
+# Plot loadings
+
+load_pro <- data_FApro$loadings[,1:2]
+qplot(x=load_pro[,1], y=load_pro[,2], xlab = "Factor 1", ylab = "Factor 2", label=rownames(load_pro), main = "Factor Analysis Loadings", geom="text")
+```
+
+We also examine scores, testing both Thompson and Bartlett's scoring methods with our promax rotation. Our graphs are color coded by cylinders because we want to be able to see the most separation in our variables. We chose cylinders based on our previous PCA results, which suggested that cylinders are the most clear variable upon which our factors are split. Our Thompson's results (regression based) show a positive, almost linear relationship between vehicles with the same number of cylinders. We see that a low number of cylinders are higher in factor 2, and corresponding data with more cylinders are shifted to the right to create three clear groups, those with the least to the most cylinders. Vehicles with the most cylinders end up loading most heavily in factor 1 compared to similar vehicles with a different number of cylinders. The Bartlett scores are more clustered compared to the linear Thompson results, but these too show a clear distinction by number of cylinders. Vehicles with more cylinders have higher scores for factor 2, compared to those with lower cylinders, again moving left-to-right in clusters. Both of these results show similar outcomes, so we could proceed with either set of scores. 
+
+```{r}
+
+# Plot scores
+
+fa_scores_reg = factanal(x=auto_sub, factors=2,rotation='promax', scores='regression')
+scores_reg = fa_scores_reg$scores
+df_reg = data.frame(Factor1=scores_reg[,1], Factor2=
+                  scores_reg[,2], cylinders=auto_data[,2], origin=auto_data[,8],Vars=rownames(auto_sub))
+
+df_reg_plot = ggplot(df_reg,aes(x=Factor1,y=Factor2))+geom_text(aes(label=Vars, col=cylinders))+theme_bw() + ggtitle("Factor Analysis Thompson Scores")
+
+
+fa_scores_bart = factanal(x=auto_sub, factors=2,rotation='promax', scores='Bartlett')
+scores_bart = fa_scores_bart$scores
+df_bart = data.frame(Factor1=scores_bart[,1], Factor2=
+                  scores_bart[,2], cylinders=auto_data[,2], origin=auto_data[,8],Vars=rownames(auto_sub))
+
+df_bart_plot = ggplot(df_bart,aes(x=Factor1,y=Factor2))+geom_text(aes(label=Vars, col=cylinders))+theme_bw() + ggtitle("Factor Analysis Bartlett Scores")
+
+grid.arrange(df_reg_plot, df_bart_plot, nrow = 1)
+
+```
+
+Finally we compare these results to MDS, which is different from PCA and Factor Analysis in that we are using distances and also able to sometimes include categorical variables as well. We create a centered and scaled dataset on which to compute distances other than Gower, and a full dataset that includes origin, model_year, and cylinders as factors (car_name is already considered a factor) on which to compute Gower distances. For Gower our factor variables are compared only in such that x = y in level (the same category), not that say 1 and 3 are closer together and meaningfully so than say 1 and 10. 
+
+We test a number of different distances including Abscor, Euclidean, Maximum, Manhattan, and Gower, overlaying the cylinder coloring to see if we have clear differentiation between different groups. Because we have already done this for PCA and Factor Analysis, while they are different, we still expect to see similar separation in these data based on cylinder.  
+
+From our various plots we can see different amounts of separation according to number of cylinders. Since we are looking for the most cleanly separated data. Euclidean seems quite similar to Maximum distance, and even though the dispersion is slightly different, similar to Manhattan in terms of amount of separation. Gower, which as we noted treats factor variables through in-category comparison, seems to most cleanly separate our data. This seems reasonable given that cylinder is one of the categorical variables upon which Gower computes a comparison. We notice our Euclidean distance score results match our PCA results, which we expect to be consistent.
+
+Overall our results are fairly consistent between PCA, FA, and MDS. While PCA is maximizing variance, FA is ensuring the residuals and loadings are orthogonal, and MDS is perserving distances and has no underlying distributional assumption, we can clearly see that the number of cylinders is a way to separate our automative data (and our PCA results match our MDS results). Through PCA and FA we can also see the general relationship between the quantitative variables, namely that weight, displacement, and horsepower move in the same direction, distinct from acceleration and mpg. Depending on our differing primary goal we may choose any of these.
+
+```{r}
+
+# MDS for question 3
+
+auto_sub_scale <- scale(auto_sub)
+
+# Create separate Gower dataset
+
+auto_sub_gower <- as.data.frame(auto_sub_scale)
+auto_sub_gower <- dplyr::mutate(auto_sub_gower, cylinders = auto_data[,2], model_year = auto_data[,7], origin = auto_data[,8], car_name = auto_data[,9]) %>%
+  mutate(cylinders = factor(cylinders), origin = factor(origin), model_year = factor(model_year))
+
+# Add cylinders into dataset 
+
+auto_sub_gower <- dplyr::mutate(as.data.frame(auto_sub_gower), cylinders = factor(cylinders), origin = factor(origin))
+
+dist_abscor <- 1-abs(cor(t(auto_sub_scale)))
+dist_eu <- dist(auto_sub_scale, method = "euclidean")
+dist_man <- dist(auto_sub_scale, method = "manhattan")
+dist_sup <-  dist(auto_sub_scale, method = "maximum")
+dist_gower <-  daisy(auto_sub_gower, metric = "gower")
+
+# Create list of distances so these can be compared across different types
+
+dist_list <- list(dist_abscor, dist_eu, dist_man, dist_sup, dist_gower)
+
+# Want to be able to label plots
+
+names(dist_list) <- c("abscor", "euclidean", "manhattan", "max", "gower")
+
+# Create plots
+
+do.call("grid.arrange", c(lapply(names(dist_list), function(name) {
+  ggplot(data = as.data.frame((cmdscale(dist_list[[name]]))), aes(x = V1, y = V2, color=auto_sub_gower$cylinders)) + 
+    geom_point() + labs(title = name, x="Factor 1", y="Factor 2")
+}), nrow = 3))
+
+```
+
+```{r}
+org_plot <- ggplot(data = pca_project) + 
+  geom_point(aes(x = V1, y = V2, col = origin)) 
+org_plot + labs(title = "PCA by Origin", x="Factor 1", y="Factor 2")
+
+```
+

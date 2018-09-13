@@ -1,0 +1,299 @@
+% =====================================
+% Purpose: Create a Robert Bringhurst style thesis paper using the 
+% classicthesis package and some custom enhancements - this is 
+% the default template for most of my documents
+% =====================================
+
+% =====================================
+% Document Class and main packages
+% =====================================
+
+\documentclass[10pt,a4paper, hidelinks]{article} % KOMA-Script article scrartcl
+\usepackage[nochapters, pdfspacing]{classicthesis} % nochapters %drafting (puts date/time at bottom) beramono (changed mono spaced font)
+
+% =====================================
+% Packages in Use
+% =====================================
+
+%Math Packages
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{nicefrac} % For typsetting inline fractions
+\usepackage{mathtools} % For substack and mathclap (underbrace helper commands)
+
+%% Typography enhancements
+\usepackage{microtype} % For awesome typographical improvements
+\usepackage{booktabs} % Pretty \begin{tabular}
+\usepackage{multicol} % For pretty multi-columns enviroments
+\usepackage{xspace} % For use in a command to ensure proper spacing
+%\usepackage{geometry} %uncomment this is you want full page documentation
+\usepackage{graphicx} % for allowing pictures
+\usepackage{float} % For the purpose of adding \begin{figure} [H]
+\usepackage{lipsum} % For adding filler text
+
+% For commenting on incomplete or new items
+\usepackage{todonotes} % \missingfigure{} is the best command
+\usepackage{csvsimple}
+% =====================================
+% Graphics 
+% =====================================
+
+% For quick graphics insert -- Full Line --
+\newcommand{\qpic}[2]{
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\linewidth]{./#1}
+\end{figure}
+}
+
+% For quick graphics insert -- Normal Size --
+\newcommand{\qpics}[2]{
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\linewidth]{./#1}
+\caption{#2}
+\label{fig:#1}
+\end{figure}
+}
+
+% =====================================
+% Custom Macros that make life easier
+% =====================================
+
+% Description Enviroment Item Helper Commands
+\newcommand{\im}[1]{\item[#1] \xspace}
+\newcommand{\imp}[1]{\item[(#1)] \xspace}
+
+% Auto-commas for long nominal and dollar amounts
+\RequirePackage{siunitx}
+\newcommand{\commasep}[1]{\num[group-separator={,}]{#1}}
+\newcommand{\money}[1]{\$\commasep{#1}}
+
+% Borrowing from tufte, this is the \newthought command that is 
+% often used to bring about the change from one subsubsection
+% to another and is a good way to bring things up logically into smaller
+% bites
+\newcommand{\newthought}[1]{
+\vspace{11pt} \noindent
+\spacedlowsmallcaps{#1}
+}
+
+% Code to produce spaced small caps in real text
+\newcommand{\mysmallcaps}[1]{\spacedlowsmallcaps{#1}\xspace}
+
+% =====================================
+% For handling code blocks and other text
+% =====================================
+
+% Code to handle inputting code segments in R
+\usepackage{listings} % To import code use: \lstinputlisting[language=R]{h1code.r}
+\lstset{language=R} % \lstinputlisting[language={}]{file.txt} for  unformatted code
+\usepackage{color}
+\definecolor{mygreen}{rgb}{0,0.6,0}
+\definecolor{mygray}{rgb}{0.5,0.5,0.5}
+\definecolor{mymauve}{rgb}{0.58,0,0.82}
+
+\lstset{ %
+  backgroundcolor=\color{white},   % choose the background color; you must add \usepackage{color} or \usepackage{xcolor}
+  basicstyle=\footnotesize,        % the size of the fonts that are used for the code
+  breakatwhitespace=false,         % sets if automatic breaks should only happen at whitespace
+  breaklines=true,                 % sets automatic line breaking
+  captionpos=b,                    % sets the caption-position to bottom
+  commentstyle=\color{mygreen},    % comment style
+  deletekeywords={...},            % if you want to delete keywords from the given language
+  escapeinside={\%*}{*)},          % if you want to add LaTeX within your code
+  extendedchars=true,              % lets you use non-ASCII characters; for 8-bits encodings only, does not work with UTF-8
+  frame=single,	                   % adds a frame around the code
+  keepspaces=true,                 % keeps spaces in text, useful for keeping indentation of code (possibly needs columns=flexible)
+  keywordstyle=\color{blue},       % keyword style
+  language=R,                 % the language of the code
+  otherkeywords={*,...},            % if you want to add more keywords to the set
+  numbers=left,                    % where to put the line-numbers; possible values are (none, left, right)
+  numbersep=5pt,                   % how far the line-numbers are from the code
+  numberstyle=\tiny\color{mygray}, % the style that is used for the line-numbers
+  rulecolor=\color{black},         % if not set, the frame-color may be changed on line-breaks within not-black text (e.g. comments (green here))
+  showspaces=false,                % show spaces everywhere adding particular underscores; it overrides 'showstringspaces'
+  showstringspaces=false,          % underline spaces within strings only
+  showtabs=false,                  % show tabs within strings adding particular underscores
+  stepnumber=2,                    % the step between two line-numbers. If it's 1, each line will be numbered
+  stringstyle=\color{mymauve},     % string literal style
+  tabsize=2,	                   % sets default tabsize to 2 spaces
+  title=\lstname                   % show the filename of files included with \lstinputlisting; also try caption instead of title
+}
+
+\newcommand{\incsv}[1]{
+\begin{center}
+	\csvautotabular{#1}
+\end{center}
+
+}
+
+\newcommand{\mysec}[1]{\subsection*{#1}}
+
+% =====================================
+% Beginning the main document
+% =====================================
+
+\begin{document}
+\pagestyle{plain} 
+\title{\rmfamily\normalfont\spacedallcaps{Classification Trees}}
+%\author{\spacedlowsmallcaps{Sam Edds}}
+\date{\today} % no date or \today if you want to insert a date
+
+\maketitle
+\section{Overview}
+
+We use an email spam dataset to predict whether or not emails are spam based on 57 features. This dataset has over 3,000 observations to train on and over 1,000 to predict on.
+
+We classify spam emails through support vector machines (SVM), neural networks, and decision trees. We first choose to standardize our data so the predicted values of the SVM/neural network/decision tree can be accurately compared to that of the actual data. For neural network in particular failure to normalize the data often results in the prediction value remaining the same across all observations regardless of the input.
+
+We will examine our results through 10-fold cross validation for SVM, neural networks, and decision trees. After choosing our optimal model we apply the final models for each and view the train and test error.
+
+Throughout this we also examine our given dataset (which we call the Balanced, referring to the balanced sample), before we adjust the ratios to view more skewed class ratios, specifically 3:7, 2:8, and 1:9. Finally, we bootstrap data to see if this improves the classification performance on each of the three methods. 
+
+%\newcommand{\myx}{\stackrel{x}{\sim}}
+\newcommand{\myx}{\underset{\sim}{x}}
+\newcommand{\myy}{\underset{\sim}{y}}
+\newcommand{\myz}{\underset{\sim}{z}}
+\newcommand{\myt}{\tilde{T}}
+
+\section{SVM}
+
+We examine support vector machines as a method of classification. For SVM we use the tuning parameter cost which is the weight for penalizing the soft margin. We test costs from exponential -2 to 2, which acts as a control over the total amount of slack allowed. 
+
+We also examine the tuning parameters for certain kernel choices, of which we use Linear, Gaussian, and Polynomial. Our tuning parameters for Linear are just costs. For Gaussian we vary cost and gamma (.01, .05, .1 respectively). A small gamma acts as a distribution with large variance. Therefore the support vector has an influence on deciding the class of a given point even if the distance between them is large. Conversely, for a large gamma, the support vector does not have wide spread influence on determining the class of a given point. Finally, for Polynomials we adjust cost, gamma, and degrees (quadratic and cubic). 
+
+We optimize over these different parameters, cross-validating for each combination, and see the averaged following results. Below is how we would interpret our SVM graphs based on our balanced data, and we will then focus only on our optimal ones. 
+
+We compute our final train and test errors on each of the best model by kernel type.  We choose our train/test based on our optimal model which produced the lowest cross-validated error rate, by kernel type. We then compute final train and test errors to see which of our optimal model produces the best results compared to the other kernels. 
+
+Interestingly we see our cross-validated errors for the most part are very steady past a cost of 2 for every kernel, aside from Polynomial with a Gamma of .01. It seems once a certain cost is reached our error remains fairly steady. In terms of gamma, when applicable, there is the most difference moving from no cost to a low cost penalty (aside from Polynomial with gamma of 0.01), which makes sense because some amount of cost penalty for slackness seems better than none. 
+
+For degrees quadratic has much lower error for a given cost than cubic, but this goes away when there becomes a gamma of .05. 
+
+Finally we see the Gaussian optimal kernel has the lowest test error of 5.21 percent. 
+
+We now look across our different ratios to see if changing the ratio of spam and non-spam impacts our results, as well as resampling with bootstrapping. 
+
+We notice our other ratios still have close to the same error rate past a certain cost, but there is a much more steep tail in that low costs have very high error rates for these models. This seems impacted by the higher amounts of non-spam which at a low to no-cost (so little to no penalty) generates higher error amounts, which makes sense. 
+
+As with our normal model we notice our training errors are often extremely close to or 0, while our optimal test errors range from 5 to 14 percent. Our kernel type also varies in terms of which produces some optimal parameters for the best train and test. Our 3-7 ratio is Gaussian, our 2-8 is Linear, our 1-9 Polynomial, and resampled Linear. 
+
+Overall, our lowest error is for our original balanced dataset, which makes sense because we can sample equally and have an easier time correctly classifying our results. Otherwise our 3-7 does next best, followed by our resampled, then our 2-8, and finally our 1-9, all of which are consistent with the idea of balancing being very important in impacting our ability to correctly classify.
+
+	\mysec{Balanced Cross-Validated SVM plots}
+	\qpic{norm_svm}
+
+	\mysec{Train/Test Best Error Balanced}
+	\incsv{normal_cv_svm.csv}
+	
+	\mysec{3-7 Ratio Cross-Validated SVM plots}
+	\qpic{3_7_svm}
+	
+	\mysec{Train/Test Best Error 3-7 Ratio}
+	\incsv{3-7_cv_svm.csv}
+	
+	\mysec{2-8 Ratio Cross-Validated SVM plots}
+	\qpic{2-8_cv_svm}
+	
+	\mysec{Train/Test Best Error 2-8 Ratio}
+	\incsv{2-8_cv_svm.csv}
+	
+	\mysec{1-9 Ratio Cross-Validated SVM plots}
+	\qpic{1_9_svm}
+	
+	\mysec{Train/Test Best Error 1-9 Ratio}
+	\incsv{1-9_cv_svm.csv}
+	
+	\mysec{Resampled Cross-Validated SVM plots}
+	\qpic{resmp_svm}
+	
+	\mysec{Train/Test Best Error Resampled}
+	\incsv{resampled_data_cv_svm.csv}
+		
+	
+\section{Neural Networks}
+
+For our neural networks we examine how sensitive our results are to the number of hidden layers (both number of layers and nodes). We examine having between 1-2 hidden layers, combined with using 5, 10, and 15 nodes.  This is done for our balanced model and all of our ratios and resampled models. Based on our optimal cross-validated model we compute the train and test errors. 
+
+Interestingly across all of my cross-validated neural networks, the 15 nodes, and 1 layer produced the optimal model, with error rates between 1.2 and 4.4 percent. The resampled data did the best for cross-validation error, followed by the 1-9, 2-8, 3-7, and finally balanced model. For testing error we found between 4.9 and 10.6 percent. While our optimal cross-validated model with the lowest error was the resampled, for our test error the balanced dataset has the lowest test error at 4.9 percent, followed by the 3-7, resampled, 1-9, and finally 2-8. This indicates some amount of overfitting in the training data particularly with unbalanced data. Finally we see that the 15 nodes being optimal and 1 layer show that the structure of the neural net is not particularly sensitive to the ratio of spam to not-spam data.
+
+
+	\mysec{Normal Cross-Validated Neural Network Errors}
+	\incsv{normal_cv_nn.csv}
+
+	\mysec{Train/Test Best Error Balanced}
+	\incsv{normal_final_nn_test.csv}
+
+	\mysec{3-7 Ratio Cross-Validated Neural Network Errors}
+	\incsv{3-7_cv_nn.csv}
+
+	\mysec{Train/Test Best Error 3-7 Ratio}
+	\incsv{3-7_final_nn_test.csv}
+	
+	\mysec{2-8 Ratio Cross-Validated Neural Network Errors}
+	\incsv{2-8_cv_nn.csv}
+
+	\mysec{Train/Test Best Error 2-8 Ratio}
+	\incsv{2-8_final_nn_test.csv}
+	
+	\mysec{1-9 Ratio Cross-Validated Neural Network Errors}
+	\incsv{1-9_cv_nn.csv}
+
+	\mysec{Train/Test Best Error 1-9 Ratio}
+	\incsv{1-9_final_nn_test.csv}
+	
+	\mysec{Resampled Cross-Validated Neural Network Errors}
+	\incsv{resampled_data_cv_nn.csv}
+
+	\mysec{Train/Test Best Error Resampled}
+	\incsv{resampled_data_final_nn_test.csv}
+	
+	
+\section{Decision Trees}
+
+For our decision trees we examine how sensitive our results are to tree size. We examine between 0-6 maximum depth, with no restrictions on tree size being 0. This is done for our balanced model and all of our ratios and resampled models. Based on our optimal cross-validated model we compute the train and test errors. 
+
+Overall, we see the tree size sensitivity is consistent amount our different samples, as the shapes of our graphs (showing all of the cross-validated error for each of the 10 runs) are similar, with just varying levels of error. 
+
+We always see that no restrictions on our model produce the best cross-validated error, although one then immediately suspects overfitting the training data. All of our graphs also show adding some kind of tree size restrictions creates much higher error, but as the restrictions increase, the range of errors drops steadily. 
+
+Interestingly, as we examine the range of our potential errors, we can see there are sometimes tree size restrictions that have less variability in cross validated errors than others. 
+
+Finally, we see based on our testing errors for our balanced model is about 46 percent, the 3-7 is around 15 percent, the 2-8 ratio around 20 percent, the 1-9 also around 20 percent, and the resampled with about 35 percent error. 
+
+Clearly the decision trees and having to split among so many different variables is suboptimal in terms of classification compared to SVM and neural networks, both of which produce fairly similar testing errors. 
+
+	\mysec{Balanced Cross-Validated Decision Tree plots}
+	\qpic{normal_trees}
+	
+	\mysec{Train/Test Best Error Balanced}
+	\incsv{normal_final_tr_test.csv}
+	
+	\mysec{3-7 Ratio Cross-Validated Decision Tree plots}
+	\qpic{3-7_trees}
+
+	\mysec{Train/Test Best Error 3-7 Ratio}
+	\incsv{3-7_final_tr_test.csv}
+	
+	\mysec{2-8 Ratio Cross-Validated Decision Tree plots}
+	\qpic{2-8_trees}
+
+	\mysec{Train/Test Best Error 2-8 Ratio}
+	\incsv{2-8_final_tr_test.csv}
+	
+	\mysec{1-9 Ratio Cross-Validated Decision Tree plots}
+	\qpic{1-9_trees}
+
+	\mysec{Train/Test Best Error 1-9 Ratio}
+	\incsv{1-9_final_tr_test.csv}
+	
+	\mysec{Resampled Cross-Validated Decision Tree plots}
+	\qpic{resmp_trees}
+	
+	\mysec{Train/Test Best Error Resampled}
+	\incsv{resampled_data_final_tr_test.csv}
+
+	
+\end{document}
